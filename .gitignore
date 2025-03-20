@@ -97,6 +97,6 @@ models/
 outputs/
 multirun/
 py311/
-
+test/
 
 *.zip
