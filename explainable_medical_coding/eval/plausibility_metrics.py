@@ -52,7 +52,8 @@ def calculate_error_matrix_from_dataframe(
     """
     pred_groundtruth = df.select(
         predicted_token_ids=pl.col("attributions").map_elements(
-            lambda x: attributions2token_ids(x, decision_boundary)
+            lambda x: attributions2token_ids(x, decision_boundary),
+            return_dtype=pl.List(pl.Int64)
         ),
         evidence_token_ids=pl.col("evidence_token_ids"),
     )
