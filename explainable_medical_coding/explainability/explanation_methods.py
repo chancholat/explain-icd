@@ -922,7 +922,7 @@ def get_invert_label_att_callable(
         attention_mask = create_attention_mask(input_ids)
         with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=True):
             attention = model.get_invert_label_attention(
-                input_ids, attention_mask, output_attentions=True
+                input_ids, attention_mask
             )
         attention = attention.squeeze(
             0
