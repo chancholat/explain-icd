@@ -73,7 +73,7 @@ class PLMICD(nn.Module):
             )
         
         self.invert_label_wise_attention = InvertLabelCrossAttention(
-            input_size=self.config.hidden_size, num_classes=num_classes, scale=scale
+            label_wise_attention=self.label_wise_attention, num_classes=num_classes, scale=scale
         )
 
         self.mask_input = mask_input
