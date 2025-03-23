@@ -423,4 +423,4 @@ class PLMICD(nn.Module):
         attention_masks: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         hidden_output = self.encoder(input_ids, attention_masks)
-        return self.invert_label_wise_attention(hidden_output, attention_masks)
+        return self.invert_label_wise_attention.forward(hidden_output, attention_masks)
