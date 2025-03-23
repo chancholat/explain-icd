@@ -153,17 +153,13 @@ class LabelCrossAttention(nn.Module):
 #### Added by chancholat
 ###############################################
 
-class InvertLabelCrossAttention(nn.Module):
-    def __init__(self, input_size: int, num_classes: int, scale: float = 1.0):
-        super().__init__()
-        self.weights_k = nn.Linear(input_size, input_size, bias=False)
-        self.label_representations = torch.nn.Parameter(
-            torch.rand(num_classes, input_size), requires_grad=True
-        )
+class InvertLabelCrossAttention():
+    def __init__(self, label_wise_attention: LabelCrossAttention, num_classes: int, scale: float = 1.0):
+        self.weights_k = label_wise_attention.weights_k
+        self.label_representations = label_wise_attention.label_representations
       
         self.num_classes = num_classes
         self.scale = scale
-        self._init_weights(mean=0.0, std=0.03)
 
     def forward(
         self,
@@ -205,23 +201,9 @@ class InvertLabelCrossAttention(nn.Module):
 
         attention = torch.softmax(
             att_weights / self.scale, dim=2
-        )  # [batch_size, num_classes, seq_len]
+        )  # [batch_size, seq_len, num_classes]
         
         return attention
-
-    def _init_weights(self, mean: float = 0.0, std: float = 0.03) -> None:
-        """
-        Initialise the weights
-
-        Args:
-            mean (float, optional): Mean of the normal distribution. Defaults to 0.0.
-            std (float, optional): Standard deviation of the normal distribution. Defaults to 0.03.
-        """
-
-        self.weights_k.weight = torch.nn.init.normal_(self.weights_k.weight, mean, std)
-        self.label_representations = torch.nn.init.normal_(
-            self.label_representations, mean, std
-        )
       
 
 class InputMasker(nn.Module):
