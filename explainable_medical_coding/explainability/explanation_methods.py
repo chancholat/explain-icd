@@ -892,3 +892,42 @@ def get_random_baseline_callable(**kwargs) -> Explainer:
         return attributions / attributions.sum(0, keepdim=True)
 
     return random_baseline_callable
+
+
+
+
+###################
+## Added by chancholat
+####################
+@torch.no_grad()
+def get_invert_label_att_callable(
+    model: PLMICD,
+    **kwargs,   
+) -> Explainer:
+    """Get a callable explainer
+
+    Args:
+        model (PLMICD): Model to explain
+
+    Returns:
+        Explainer: Callable LAAT explainer
+    """
+    def invert_label_att_callable(
+        input_ids: torch.Tensor,
+        target_ids: torch.Tensor,
+        device: str | torch.device,
+    ) -> torch.Tensor:
+        input_ids = input_ids.to(device)
+        sequence_length = input_ids.shape[1]
+        attention_mask = create_attention_mask(input_ids)
+        with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=True):
+            attention = model.get_invert_label_attention(
+                input_ids, attention_mask, output_attentions=True
+            )
+        attention = attention.squeeze(
+            0
+        ).detach()  # [sequence_length+padding, num_classes]
+        attention = attention[:sequence_length, target_ids]
+        return attention.cpu()
+    
+    return invert_label_att_callable

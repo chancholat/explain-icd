@@ -74,7 +74,6 @@ class LabelCrossAttention(nn.Module):
         attention_masks: Optional[torch.Tensor] = None,
         output_attention: bool = False,
         attn_grad_hook_fn: Optional[Callable] = None,
-        ouput_norm: Optional[bool] = False, # added by chancholat
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Label Cross Attention mechanism
 
@@ -149,80 +148,6 @@ class LabelCrossAttention(nn.Module):
             self.output_linear.weight, mean, std
         )
 
-###############################################
-#### Added by chancholat
-###############################################
-
-class InvertLabelCrossAttention(nn.Module):
-    def __init__(self, input_size: int, num_classes: int, scale: float = 1.0):
-        super().__init__()
-        self.weights_k = nn.Linear(input_size, input_size, bias=False)
-        self.label_representations = torch.nn.Parameter(
-            torch.rand(num_classes, input_size), requires_grad=True
-        )
-      
-        self.num_classes = num_classes
-        self.scale = scale
-        self._init_weights(mean=0.0, std=0.03)
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        attention_masks: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        """Label Cross Attention mechanism
-
-        Args:
-            x (torch.Tensor): [batch_size, seq_len, input_size]
-
-        Returns:
-            torch.Tensor: [batch_size, num_classes]
-        """
-
-        K = self.weights_k(x)
-        Q = self.label_representations
-
-        att_weights = K.matmul(Q.transpose(1, 0))  # [batch_size, seq_len, num_classes]
-
-        # replace nan with max value of float16
-        # att_weights = torch.where(
-        #     torch.isnan(att_weights), torch.tensor(30000), att_weights
-        # )
-        if attention_masks is not None:
-            # pad attention masks with 0 such that it has the same sequence lenght as x
-            attention_masks = torch.nn.functional.pad(
-                attention_masks, (0, x.size(1) - attention_masks.size(1)), value=0
-            )
-            attention_masks = attention_masks.to(torch.bool)
-            # repeat attention masks for each class
-            attention_masks = attention_masks.unsqueeze(2).repeat(
-                1, 1, self.num_classes
-            )
-            attention_masks = attention_masks.masked_fill_(
-                attention_masks.logical_not(), float("-inf")
-            )
-            att_weights += attention_masks
-
-        attention = torch.softmax(
-            att_weights / self.scale, dim=2
-        )  # [batch_size, num_classes, seq_len]
-        
-        return attention
-
-    def _init_weights(self, mean: float = 0.0, std: float = 0.03) -> None:
-        """
-        Initialise the weights
-
-        Args:
-            mean (float, optional): Mean of the normal distribution. Defaults to 0.0.
-            std (float, optional): Standard deviation of the normal distribution. Defaults to 0.03.
-        """
-
-        self.weights_k.weight = torch.nn.init.normal_(self.weights_k.weight, mean, std)
-        self.label_representations = torch.nn.init.normal_(
-            self.label_representations, mean, std
-        )
-      
 
 class InputMasker(nn.Module):
     def __init__(self, input_size: int, scale: float = 1.0):

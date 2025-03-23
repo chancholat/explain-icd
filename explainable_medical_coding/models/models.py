@@ -14,6 +14,7 @@ from explainable_medical_coding.models.modules.attention import (
     InputMasker,
     LabelAttention,
     LabelCrossAttention,
+    InvertLabelCrossAttention
 )
 
 
@@ -70,6 +71,11 @@ class PLMICD(nn.Module):
                 projection_size=self.config.hidden_size,
                 num_classes=num_classes,
             )
+        
+        self.invert_label_wise_attention = InvertLabelCrossAttention(
+            input_size=self.config.hidden_size, num_classes=num_classes, scale=scale
+        )
+
         self.mask_input = mask_input
         if self.mask_input:
             self.input_masker = InputMasker(
@@ -410,3 +416,11 @@ class PLMICD(nn.Module):
             attention_rollout = attentions[:, hidden_layer_idx] @ attention_rollout
 
         return label_wise_attention @ attention_rollout
+    
+    def get_invert_label_attention(
+        self,
+        input_ids: torch.Tensor,
+        attention_masks: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        hidden_output = self.encoder(input_ids, attention_masks)
+        return self.invert_label_wise_attention(hidden_output, attention_masks)

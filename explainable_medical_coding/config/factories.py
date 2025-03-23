@@ -245,6 +245,7 @@ def get_explainability_method(name: str) -> Callable:
         "random": explainability_methods.get_random_baseline_callable,
         "grad_attention": explainability_methods.get_grad_attention_callable,
         "atgrad_attention": explainability_methods.get_atgrad_attention_callable,
+        "invert_label_att": explainability_methods.get_invert_label_att_callable,
     }
 
     if name not in methods:
