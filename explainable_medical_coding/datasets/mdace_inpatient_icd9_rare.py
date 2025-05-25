@@ -62,7 +62,7 @@ class MDACE_Inpatient_ICD9(datasets.GeneratorBasedBuilder):
 
     BUILDER_CONFIGS = [
         MDACE_Inpatient_ICD9_Config(
-            name="mdace_inpatient_icd9",
+            name="mdace_inpatient_icd9_rare",
             version=datasets.Version("1.0.0", ""),
             description="Plain text",
         ),
