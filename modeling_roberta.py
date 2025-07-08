@@ -150,7 +150,6 @@ class RobertaEmbeddings(nn.Module):
         )
         return position_ids.unsqueeze(0).expand(input_shape)
 
-
 # Copied from transformers.models.bert.modeling_bert.BertSelfAttention with Bert->Roberta
 class RobertaSelfAttention(nn.Module):
     def __init__(self, config, position_embedding_type=None):
@@ -293,7 +292,6 @@ class RobertaSelfAttention(nn.Module):
         if self.is_decoder:
             outputs = outputs + (past_key_value,)
         return outputs
-
 
 # Copied from transformers.models.bert.modeling_bert.BertSelfOutput
 class RobertaSelfOutput(nn.Module):

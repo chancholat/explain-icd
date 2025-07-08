@@ -20,7 +20,8 @@ def f1_score_db_tuning(logits, targets, average="micro", type="single"):
     if type == "single":
         best_f1 = f1_scores.max()
         best_db = dbs[f1_scores.argmax()]
-        print(f"Best F1: {best_f1:.4f} at DB: {best_db:.4f}")
+        # print(f"Best F1: {best_f1:.4f} at DB: {best_db:.4f}")
+        print(f"Best F1: {best_f1} at DB: {best_db}")
         return best_f1, best_db
     if type == "per_class":
         best_f1 = f1_scores.max(1)
