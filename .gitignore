@@ -99,5 +99,6 @@ outputs/
 multirun/
 py311/
 test/
+icd9/
 
 *.zip
