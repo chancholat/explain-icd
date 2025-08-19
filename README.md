@@ -52,7 +52,7 @@ Instead of using `make prepare_everything`, you can run it in multiple steps. Th
 
 ## Explainable Medical Coding
 
-We have reuse lots of material from the work of Edin et. al. If you use the this work, remember to cite the authors:
+We have reused lots of material from the work of Edin et. al. If you use the this work, remember to cite the authors:
 
 ```
 @misc{edinUnsupervisedApproachAchieve2024,
