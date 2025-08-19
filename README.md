@@ -52,7 +52,7 @@ Instead of using `make prepare_everything`, you can run it in multiple steps. Th
 
 ## Explainable Medical Coding
 
-We have copied the annotations from https://github.com/3mcloud/MDACE. It is not an attempt to steal credit from the authors, we just want to make the setup of the code as effortless as possible. If you use the annotations, remember to cite the authors:
+We have reuse lots of material from the work of Edin et. al. If you use the this work, remember to cite the authors:
 
 ```
 @misc{edinUnsupervisedApproachAchieve2024,
