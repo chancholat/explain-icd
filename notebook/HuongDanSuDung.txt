@@ -1,0 +1,12 @@
+Chương trình được thực hiến chính trên các notebook đính kèm.
+Mã nguồn trong thư mục explain-icd để chuẩn bị dữ liệu, thiết lập các module train và evaluate cho nhiệm vụ huấn luyện mô hình gán nhã ICD (mô hình PLM-ICD)
+Các notebook sử dụng mã nguồn trong thư mục explain-icd (và một số thư viện khác được cài đặt từ github), trọng số mô hình và dữ liệu được lưu trữ trên nền tản Kaggle và Huggingface
+Một số bộ dữ liệu được sử dụng trong nghiên cứu cần phải có quyền truy cập hợp lệ, ví dụ như bộ dữ liệu MIMIC. Quyền truy cập này do đơn vị cung cấp dữ liệu quy định. Trong thời gian thực hiện khóa luận, chúng tôi sẽ để quyền truy cập các phiên bản dữ liệu mà mình quản lý thành public để phục vụ cho việc truy xuất dễ dàng. Sau thời gian bảo vệ, các dữ liệu nhạy cảm sẽ được đóng lại theo quy định sử dụng.
+
+Nhiệm vụ phân tích và chuẩn bị dữ liệu được thực hiện trong notebook XAI_Health_Care_Data_prepare.ipynb
+Nhiệm vụ huấn luyện mô hình BioGPT để phát sinh ghi chú y tế được thực hiện trong notebook XAI_Health_Care_BioGPT_training.ipynb
+Nhiệm vụ phát sinh ghi chú y tế tổng hợp được thực hiện trong notebook XAI_Health_Care_Data_synthesis.ipynb
+Nhiệm vụ huấn luyện mô hình PLM-ICD trên dữ liệu đã được tổng hợp được thực hiện trong notebook XAI_Health_Care_PLM_ICD.ipynb
+Nhiệm vụ đánh giá chất lượng dữ liệu tổng hợp được thực hiện trong notebook XAI_Health_Care_Evaluate_Synthesis_notes.ipynb
+Nhiệm vụ đánh giá khả năng giải thích được thực hiện trong notebook XAI_Health_Care_Evaluate_Explaination.ipynb
+Nhiệm vụ đánh giá hiệu quả của mô hình gán nhãn sau khi huấn luyện trên dữ liệu tổng hợp được thực hiện trong notebook XAI_Health_Care_Evaluate_Synthesis_PLM_ICD.ipynb

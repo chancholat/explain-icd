@@ -1,0 +1,15 @@
+Thư mục explain-icd có chứa mã nguồn của công trình của Edin Joakim và cộng sự (https://github.com/JoakimEdin/explainable-medical-coding)
+Chúng tôi sửa đổi một số phần như trình bày trong báo cáo.
+Hướng dẫn cài đặt môi trường cho mã nguồn trong thư mục explain-icd:
+1. cd explainable_medical_coding
+1. cd data/raw
+2.Cài đặt MIMIC-IV bằng wget (chúng tôi sử dụng phiên bản 2.2)
+3. Cài đặt MIMIC-IV-Note bằng wget (chúng tôi sử dụng phiên bản 2.2)
+4. Cài đặt MIMIC-III bằng wget (chúng tôi sử dụng phiên bản 1.4)
+5. Trở lại thư mục kho lưu trữ chính cd -
+6. Sử dụng môi trường ảo (ví dụ: conda) với python 3.11.5 đã cài đặt.
+7. Tạo tài khoản weights and biases. Có thể chạy thử nghiệm mà không cần wandb.
+8. Chuẩn bị mã, tập dữ liệu và mô hình bằng lệnh: make prepare_everything. 
+
+Đối với các file notebook, các cài đặt được viết bên trong các cell ở đầu file, không cần cài đặt gì bên ngoài notebook (khuyến nghị tạo môi trường riêng để sử dụng notebook hiệu quả).
+Các file notebook thực hiện huấn luyện và phát sinh ghi chú y tế hoạt động với mô hình ngôn ngữ BioGPT đòi hỏi cấu hình GPU >= 40RAM cho training và GPU >= 15GBRAM cho inferencing.
