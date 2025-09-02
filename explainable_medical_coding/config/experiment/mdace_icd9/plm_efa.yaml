@@ -1,6 +1,6 @@
 # @package _global_
 defaults:
-  - override /model: plm_effect_attention
+  - override /model: plm_icd
   - override /lr_scheduler: warmup_linear_decay
   - override /optimizer: adamw
   - override /callbacks: mean_average_precision
