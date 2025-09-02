@@ -630,17 +630,13 @@ def masked_pooling_aux_loss(
     model,
     lambda_aux: float = 0.3,
     stop_gradient_unselected: bool = True,
-    mask_pooling: bool = True,                       # NEW
-    soft_alpha: float = 0.0,                         # NEW
-    fallback_to_full_attention_if_empty: bool = True,# NEW
     **kwargs,
 ):
     """Document-level BCE + token-level auxiliary BCE on selected tokens.
 
-    - Masked pooling: only selected tokens contribute to label-wise pooling (or soft-weighted).
+    - Masked pooling: only selected tokens contribute to label-wise pooling.
     - Optional stop-grad: block gradients through unselected token reps.
     - Auxiliary: token head predicts labels at each token; BCE over selected positions only.
-    - If no selected tokens for a sample and fallback=True, we keep original attention for that sample.
 
     Returns: (y_probs, targets, total_loss)
     """
@@ -657,9 +653,6 @@ def masked_pooling_aux_loss(
         stop_gradient_unselected=stop_gradient_unselected,
         return_token_logits=True,
         output_attentions=False,
-        mask_pooling=mask_pooling,
-        soft_alpha=soft_alpha,
-        fallback_to_full_attention_if_empty=fallback_to_full_attention_if_empty,
     )
 
     # Primary document-level loss

@@ -1,0 +1,7 @@
+name: masked_pooling_aux_loss
+configs:
+  lambda_aux: 0.3
+  stop_gradient_unselected: true
+  mask_pooling: true          # set false for full-context forward + stop-grad
+  soft_alpha: 0.0             # e.g., 0.1 for soft pooling
+  fallback_to_full_attention_if_empty: true

@@ -424,8 +424,7 @@ class PLMICD(nn.Module):
     ) -> torch.Tensor:
         hidden_output = self.encoder(input_ids, attention_masks)
         return self.invert_label_wise_attention.forward(hidden_output, attention_masks)
-
-def forward_with_selected_tokens(
+    def forward_with_selected_tokens(
         self,
         input_ids: torch.Tensor,
         attention_masks: Optional[torch.Tensor] = None,
@@ -433,57 +432,28 @@ def forward_with_selected_tokens(
         stop_gradient_unselected: bool = True,
         return_token_logits: bool = True,
         output_attentions: bool = False,
-        mask_pooling: bool = True,                      # NEW: control whether to mask pooling
-        soft_alpha: float = 0.0,                        # NEW: soft weight for unselected tokens in pooling (0.0 = hard mask)
-        fallback_to_full_attention_if_empty: bool = True,  # NEW: if a sample selects nothing, keep original attention for that sample
     ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
-        Encoder once; optionally block gradients for unselected tokens; optionally mask pooling.
-        - If mask_pooling=True and soft_alpha==0.0, only selected tokens contribute to pooling.
-        - If mask_pooling=True and 0<soft_alpha<1, unselected tokens get weight=soft_alpha at pooling.
-        - If mask_pooling=False, pooling uses the original attention mask (full context),
-          but you can still stop gradients on unselected tokens.
+        Run the encoder once, then apply masked pooling by combining the user-provided
+        selection mask with the attention mask. Optionally block gradients through
+        unselected token representations (RHO-style). Returns (doc_logits, token_logits).
         """
+        # Encode full sequence once
         token_reps = self.encoder(input_ids, attention_masks)  # (B, L, H)
 
-        eff_attention = attention_masks  # (B, L)
+        eff_attention = attention_masks
         if selected_token_mask is not None:
             sel = selected_token_mask.to(token_reps.dtype)
             sel = sel[:, : token_reps.size(1)]  # safety clip
-            B, L = sel.shape
 
-            # Row mask: which samples have at least one selected token
-            has_any = (sel.sum(dim=1) > 0).to(token_reps.dtype).view(B, 1, 1)  # (B,1,1)
-
-            # Optional stop-gradient on unselected tokens (only for rows that have selections)
+            # Optional stop-gradient on unselected tokens
             if stop_gradient_unselected:
-                token_reps = token_reps * has_any + token_reps * (1.0 - has_any)  # no-op to ensure shape
                 token_reps = token_reps * sel.unsqueeze(-1) + token_reps.detach() * (1.0 - sel.unsqueeze(-1))
 
-            if mask_pooling:
-                if soft_alpha <= 0.0:
-                    # Hard mask: selected=1, unselected=0
-                    ea = (attention_masks.to(sel.dtype) * sel)
-                    if fallback_to_full_attention_if_empty:
-                        # For rows with no selections, keep the original attention
-                        no_sel_rows = (sel.sum(dim=1) == 0)
-                        if no_sel_rows.any():
-                            ea[no_sel_rows] = attention_masks[no_sel_rows]
-                    eff_attention = ea.to(attention_masks.dtype)
-                else:
-                    # Soft mask: selected=1.0, unselected=alpha
-                    soft_w = soft_alpha + (1.0 - soft_alpha) * sel  # (B, L)
-                    if fallback_to_full_attention_if_empty:
-                        no_sel_rows = (sel.sum(dim=1) == 0)
-                        if no_sel_rows.any():
-                            soft_w[no_sel_rows] = 1.0  # keep original attention for those rows
-                    ea = (attention_masks.to(soft_w.dtype) * soft_w)
-                    eff_attention = ea.to(attention_masks.dtype)
-            else:
-                # No pooling mask: use original attention (full context)
-                eff_attention = attention_masks
+            # Exclude unselected tokens from pooling
+            eff_attention = (attention_masks.to(sel.dtype) * sel).to(attention_masks.dtype)
 
-        # Document-level logits via label-wise attention
+        # Document-level logits via existing label-wise attention (masked pooling)
         doc_logits = self.label_wise_attention(
             token_reps,
             attention_masks=eff_attention,
@@ -492,6 +462,7 @@ def forward_with_selected_tokens(
 
         tok_logits = None
         if return_token_logits:
+            # Lazy-create a tiny token head if not already present
             if not hasattr(self, "token_aux_head") or self.token_aux_head is None:
                 self.token_aux_head = nn.Linear(token_reps.size(-1), self.num_classes)
             tok_logits = self.token_aux_head(token_reps)  # (B, L, C)

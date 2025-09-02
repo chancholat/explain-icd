@@ -7,7 +7,7 @@ Authors: Hai-Chan Nguyen, Phuong-Thuy Le-Nguyen
 
 We built this project on top of the work by Edin et. al [Explainable Medical Coding ](https://github.com/JoakimEdin/explainable-medical-coding). In our work, we add in:
 
-- **Invert Label-cross Attention**: We introduce a new attention-based explanation technique for Automatic Medical Coding by inverting the direction of attention—from clinical notes to ICD labels. This approach achieves performance comparable to the state-of-the-art method of Edin et al., while offering fresh insights into the interpretability of attention weights without requiring additional explanation-enhancing training.
+- **Invert Label-cross Attention**: We propose a novel attention-based explanation technique for Automatic Medical Coding that inverts the direction of attention—from clinical notes to ICD labels. This approach delivers performance on par with the state-of-the-art method by Edin et al., while offering new insights into the interpretability of attention weights, all without the need for additional explanation-oriented training.
 <p align="center">
   <img src="./notebook/Picture3.png" width="600" alt="centered image" />
 </p>
