@@ -1,11 +1,11 @@
 # @package _global_
 defaults:
-  - override /model: plm_icd
+  - override /model: plm_effect_attention
   - override /lr_scheduler: warmup_linear_decay
   - override /optimizer: adamw
   - override /callbacks: mean_average_precision
   - override /data: mdace_inpatient_icd9
-
+  - override /loss: efa
 
 dataloader:
   max_batch_size: 16
