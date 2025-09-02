@@ -674,10 +674,8 @@ def masked_pooling_aux_loss(
         aux_loss_all = torch.nn.functional.binary_cross_entropy_with_logits(
             tok_logits, tgt_broadcast, reduction="none"
         )  # (B, L, C)
+
         sel_bool = sel_mask.to(dtype=torch.bool)
-        pad_len = aux_loss_all.size(1) - sel_bool.size(1)
-        if pad_len > 0:
-            sel_bool = torch.nn.functional.pad(sel_bool, (0, pad_len), value=False)
         if sel_bool.any():
             sel_3d = sel_bool.unsqueeze(-1).expand_as(aux_loss_all)  # (B, L, C)
             aux_loss = aux_loss_all[sel_3d].mean()

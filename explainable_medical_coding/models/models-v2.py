@@ -425,6 +425,7 @@ class PLMICD(nn.Module):
         hidden_output = self.encoder(input_ids, attention_masks)
         return self.invert_label_wise_attention.forward(hidden_output, attention_masks)
 
+
     def forward_with_selected_tokens(
             self,
             input_ids: torch.Tensor,
@@ -442,30 +443,23 @@ class PLMICD(nn.Module):
             - If mask_pooling=True and soft_alpha==0.0, only selected tokens contribute to pooling.
             - If mask_pooling=True and 0<soft_alpha<1, unselected tokens get weight=soft_alpha at pooling.
             - If mask_pooling=False, pooling uses the original attention mask (full context),
-              but you can still stop gradients on unselected tokens.
+            but you can still stop gradients on unselected tokens.
             """
             token_reps = self.encoder(input_ids, attention_masks)  # (B, L, H)
-            # print("token reps:", token_reps.shape)
+
             eff_attention = attention_masks  # (B, L)
             if selected_token_mask is not None:
                 sel = selected_token_mask.to(token_reps.dtype)
-                pad_len = token_reps.size(1) - sel.size(1)
-                if pad_len > 0:
-                    pad_sel = torch.nn.functional.pad(sel, (0, pad_len), value=0)
-                # print("sel:", sel.shape)
-                # print("sel unsqueeeze(-1):", sel.unsqueeze(-1).shape)
                 sel = sel[:, : token_reps.size(1)]  # safety clip
                 B, L = sel.shape
 
                 # Row mask: which samples have at least one selected token
                 has_any = (sel.sum(dim=1) > 0).to(token_reps.dtype).view(B, 1, 1)  # (B,1,1)
-                # print("has any:", has_any.shape)
-
 
                 # Optional stop-gradient on unselected tokens (only for rows that have selections)
                 if stop_gradient_unselected:
                     token_reps = token_reps * has_any + token_reps * (1.0 - has_any)  # no-op to ensure shape
-                    token_reps = token_reps * pad_sel.unsqueeze(-1) + token_reps.detach() * (1.0 - pad_sel.unsqueeze(-1))
+                    token_reps = token_reps * sel.unsqueeze(-1) + token_reps.detach() * (1.0 - sel.unsqueeze(-1))
 
                 if mask_pooling:
                     if soft_alpha <= 0.0:
@@ -499,11 +493,8 @@ class PLMICD(nn.Module):
 
             tok_logits = None
             if return_token_logits:
-                device = token_reps.device
                 if not hasattr(self, "token_aux_head") or self.token_aux_head is None:
-                    self.token_aux_head = nn.Linear(token_reps.size(-1), self.num_classes).to(device)
-                else:
-                    self.token_aux_head = self.token_aux_head.to(device)
+                    self.token_aux_head = nn.Linear(token_reps.size(-1), self.num_classes)
                 tok_logits = self.token_aux_head(token_reps)  # (B, L, C)
 
             return doc_logits, tok_logits

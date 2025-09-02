@@ -25,5 +25,5 @@ data:
   max_length: 6000
 
 loss:
-configs:
-  soft_alpha: 0
+  configs:
+    soft_alpha: 0
