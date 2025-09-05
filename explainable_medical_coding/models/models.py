@@ -483,7 +483,7 @@ class PLMICD(nn.Module):
                         if fallback_to_full_attention_if_empty:
                             no_sel_rows = (sel.sum(dim=1) == 0)
                             if no_sel_rows.any():
-                                soft_w[no_sel_rows] = 1.0  # keep original attention for those rows
+                                soft_w[no_sel_rows] = soft_alpha   # keep original attention for those rows
                         ea = (attention_masks.to(soft_w.dtype) * soft_w)
                         eff_attention = ea.to(attention_masks.dtype)
                 else:

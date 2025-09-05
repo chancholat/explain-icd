@@ -18,6 +18,9 @@ from explainable_medical_coding.trainer.callbacks import BaseCallback
 from explainable_medical_coding.utils.datatypes import Lookups
 from explainable_medical_coding.utils.decision_boundary import f1_score_db_tuning
 from explainable_medical_coding.utils.settings import ID_COLUMN, TARGET_COLUMN
+from explainable_medical_coding.eval.plausibility_metrics import find_explanation_decision_boundary
+from explainable_medical_coding.utils.analysis import get_explanations
+from explainable_medical_coding.config.factories import get_explainability_method
 
 
 class Trainer:
@@ -57,13 +60,179 @@ class Trainer:
         self.current_val_results: dict[str, dict[str, torch.Tensor]] = {}
         self.stop_training = False
         self.best_db = 0.5
+        self.explanation_decision_boundary = None
+        self.reference_model = None
+        
+        # Load reference model if specified in config
+        if hasattr(config.loss, 'configs') and hasattr(config.loss.configs, 'reference_model_path') and config.loss.configs.reference_model_path:
+            self.load_reference_model(config.loss.configs.reference_model_path)
+        
+        # Add wrapper for loss function to include common parameters
+        self._original_loss_function = self.loss_function
+        self.loss_function = self._wrapped_loss_function
+        
         self.on_initialisation_end()
+        
+    def _wrapped_loss_function(self, batch, model, **kwargs):
+        """Wrapper for loss function to include common parameters."""
+        # Check if we're using masked_pooling_aux_loss
+        is_masked_pooling = (self._original_loss_function.__name__ == 'masked_pooling_aux_loss' or 
+                             self.config.loss.name == 'masked_pooling_aux_loss')
+        
+        if is_masked_pooling:
+            # Add use_token_loss from config if not explicitly provided
+            if 'use_token_loss' not in kwargs and hasattr(self.config.loss, 'configs') and hasattr(self.config.loss.configs, 'use_token_loss'):
+                kwargs['use_token_loss'] = self.config.loss.configs.use_token_loss
+            
+            # Add explanation_decision_boundary if not explicitly provided
+            if 'explanation_decision_boundary' not in kwargs and self.explanation_decision_boundary is not None:
+                kwargs['explanation_decision_boundary'] = self.explanation_decision_boundary
+                
+            # Add reference_model if available
+            if self.reference_model is not None:
+                kwargs['reference_model'] = self.reference_model
+                
+            # Add evidence_selection_strategy from config
+            if hasattr(self.config.loss, 'configs') and hasattr(self.config.loss.configs, 'evidence_selection_strategy'):
+                kwargs['evidence_selection_strategy'] = self.config.loss.configs.evidence_selection_strategy
+                
+                # Check configuration coherence
+                strategy = self.config.loss.configs.evidence_selection_strategy
+                if strategy == "reference_model" and self.reference_model is None:
+                    pprint("WARNING: evidence_selection_strategy is set to 'reference_model' but no reference model is provided.")
+                    pprint("Falling back to 'auto' strategy.")
+                    kwargs['evidence_selection_strategy'] = "auto"
+                elif strategy == "training_model":
+                    # Ensure we're using the training model - this is already handled by default
+                    pprint("Using training model for token attributions as specified by evidence_selection_strategy")
+        
+        return self._original_loss_function(batch, model=model, **kwargs)
+        
+    def load_reference_model(self, reference_model_path: str) -> None:
+        """Load a reference model to compute explanation decision boundary.
+        
+        Args:
+            reference_model_path (str): Path to the reference model checkpoint
+        """
+        from explainable_medical_coding.utils.loaders import load_trained_model
+        
+        pprint(f"Loading reference model from {reference_model_path}")
+        try:
+            model_path = Path(reference_model_path)
+            if not model_path.exists():
+                pprint(f"Reference model path does not exist: {model_path}")
+                return
+                
+            saved_config = OmegaConf.load(model_path / "config.yaml")
+            text_tokenizer = self.lookups.text_tokenizer
+            self.reference_model, _ = load_trained_model(
+                model_path,
+                saved_config,
+                pad_token_id=text_tokenizer.pad_token_id,
+                device=self.device,
+            )
+            self.reference_model.eval()  # Ensure model is in evaluation mode
+            pprint("Reference model loaded successfully")
+        except Exception as e:
+            pprint(f"Error loading reference model: {e}")
+            self.reference_model = None
+
+    def calculate_explanation_decision_boundary(self) -> float:
+        """Calculate the explanation decision boundary using the validation dataset.
+        This function should be called once during initialization and the result will be cached.
+        It uses the reference model if available, otherwise uses the training model.
+        The calculation respects the evidence_selection_strategy configuration.
+
+        Returns:
+            float: The calculated explanation decision boundary
+        """
+        if self.explanation_decision_boundary is not None:
+            return self.explanation_decision_boundary
+
+        # Determine which model to use based on evidence_selection_strategy
+        model_to_use = self.model
+        strategy = "auto"
+        
+        if hasattr(self.config.loss, 'configs') and hasattr(self.config.loss.configs, 'evidence_selection_strategy'):
+            strategy = self.config.loss.configs.evidence_selection_strategy
+            
+        if strategy == "reference_model":
+            if self.reference_model is not None:
+                model_to_use = self.reference_model
+                pprint("Using reference model for explanation decision boundary calculation")
+            else:
+                pprint("WARNING: evidence_selection_strategy is set to 'reference_model' but no reference model is provided.")
+                pprint("Falling back to training model for explanation decision boundary calculation")
+        elif strategy == "training_model":
+            model_to_use = self.model
+            pprint("Using training model for explanation decision boundary calculation")
+        elif strategy == "auto":
+            # In auto mode, prefer reference model if available
+            if self.reference_model is not None:
+                model_to_use = self.reference_model
+                pprint("Using reference model for explanation decision boundary calculation (auto mode)")
+            else:
+                pprint("Using training model for explanation decision boundary calculation (auto mode)")
+        elif strategy == "evidence_ids":
+            pprint("Using evidence_ids strategy - explanation decision boundary calculation not needed")
+            self.explanation_decision_boundary = 0.05  # Default value, won't be used
+            return self.explanation_decision_boundary
+
+        pprint("Calculating explanation decision boundary...")
+        try:            
+            # Use the full validation dataset
+            validation_dataset = self.dataloaders["validation"].dataset
+            
+            # Get the LAAT explainer
+            explainer = get_explainability_method("laat")
+            explainer_callable = explainer(model=model_to_use)
+            
+            # Get explanations for the validation dataset
+            explanations_val_df = get_explanations(
+                model=model_to_use,
+                model_path=self.experiment_path,
+                dataset=validation_dataset,
+                explainer=explainer_callable,
+                target_tokenizer=self.lookups.target_tokenizer,
+                cache=True,
+                cache_path=Path(".cache")
+            )
+            
+            # Find the explanation decision boundary
+            explanation_decision_boundary = find_explanation_decision_boundary(explanations_val_df)
+            self.explanation_decision_boundary = explanation_decision_boundary
+            
+            pprint(f"Explanation decision boundary calculated: {explanation_decision_boundary}")
+            return explanation_decision_boundary
+        except Exception as e:
+            pprint(f"Error calculating explanation decision boundary: {e}")
+            # Fallback to a default value if calculation fails
+            self.explanation_decision_boundary = 0.05
+            return 0.05
 
     def fit(self) -> None:
         """Train and validate the model."""
         try:
             self.save_configs()
             self.on_fit_begin()
+            
+            # Check if we're using masked_pooling_aux_loss
+            is_masked_pooling = (self._original_loss_function.__name__ == 'masked_pooling_aux_loss' or 
+                                self.config.loss.name == 'masked_pooling_aux_loss')
+            
+            # Calculate the explanation decision boundary before training if needed
+            if is_masked_pooling:
+                # Check the evidence selection strategy
+                need_threshold = True
+                if hasattr(self.config.loss, 'configs') and hasattr(self.config.loss.configs, 'evidence_selection_strategy'):
+                    strategy = self.config.loss.configs.evidence_selection_strategy
+                    # Only calculate threshold if needed based on strategy
+                    if strategy == "evidence_ids":
+                        need_threshold = False
+                
+                if need_threshold:
+                    self.calculate_explanation_decision_boundary()
+            
             for _ in range(self.epoch, self.epochs):
                 if self.stop_training:
                     break
@@ -106,6 +275,8 @@ class Trainer:
                     model=self.model,
                     scale=self.gradient_scaler.get_scale(),
                     epoch=epoch,
+                    explanation_decision_boundary=self.explanation_decision_boundary,
+                    use_token_loss=self.config.loss.configs.get('use_token_loss', True),
                 )
                 loss = loss / self.accumulate_grad_batches
             self.gradient_scaler.scale(loss).backward()
@@ -150,7 +321,9 @@ class Trainer:
                 device_type="cuda", enabled=self.use_amp, dtype=torch.bfloat16
             ):
                 y_probs, targets, loss = self.loss_function(
-                    batch.to(self.device), model=self.model
+                    batch.to(self.device),
+                    model=self.model,
+                    explanation_decision_boundary=self.explanation_decision_boundary,
                 )
             self.update_metrics(
                 y_probs=y_probs, targets=targets, loss=loss, split_name=split_name
@@ -179,7 +352,9 @@ class Trainer:
                 device_type="cuda", enabled=self.use_amp, dtype=torch.bfloat16
             ):
                 y_probs, targets, loss = self.loss_function(
-                    batch.to(self.device), model=self.model
+                    batch.to(self.device),
+                    model=self.model,
+                    explanation_decision_boundary=self.explanation_decision_boundary,
                 )
             self.update_metrics(
                 y_probs=y_probs, targets=targets, loss=loss, split_name=split_name
@@ -364,19 +539,48 @@ class Trainer:
             "scaler": self.gradient_scaler.state_dict(),
             "epoch": self.epoch,
             "db": self.best_db,
+            "explanation_decision_boundary": self.explanation_decision_boundary,
             "num_classes": self.lookups.data_info["num_classes"],
         }
         torch.save(checkpoint, self.experiment_path / file_name)
         pprint("Saved checkpoint to {}".format(self.experiment_path / file_name))
 
     def load_checkpoint(self, file_name: str) -> None:
+        """Load a checkpoint from a file.
+        
+        Args:
+            file_name (str): The name of the checkpoint file
+        """
         checkpoint = torch.load(self.experiment_path / file_name)
         self.model.load_state_dict(checkpoint["model"])
         self.optimizer.load_state_dict(checkpoint["optimizer"])
         self.gradient_scaler.load_state_dict(checkpoint["scaler"])
         self.epoch = checkpoint["epoch"]
         self.best_db = checkpoint["db"]
-        pprint("Loaded checkpoint from {}".format(self.experiment_path / file_name))
+        
+        # Load explanation_decision_boundary if available
+        if "explanation_decision_boundary" in checkpoint:
+            self.explanation_decision_boundary = checkpoint["explanation_decision_boundary"]
+            pprint(f"Loaded explanation decision boundary: {self.explanation_decision_boundary}")
+        else:
+            # Check if we need to calculate the explanation decision boundary
+            is_masked_pooling = (self._original_loss_function.__name__ == 'masked_pooling_aux_loss' or 
+                                self.config.loss.name == 'masked_pooling_aux_loss')
+            
+            need_threshold = False
+            if is_masked_pooling:
+                strategy = "auto"
+                if hasattr(self.config.loss, 'configs') and hasattr(self.config.loss.configs, 'evidence_selection_strategy'):
+                    strategy = self.config.loss.configs.evidence_selection_strategy
+                
+                if strategy != "evidence_ids":
+                    need_threshold = True
+                    
+            if need_threshold:
+                pprint("Explanation decision boundary not found in checkpoint. Calculating...")
+                self.calculate_explanation_decision_boundary()
+        
+        pprint(f"Loaded checkpoint from {self.experiment_path / file_name}")
 
     def save_configs(self) -> None:
         self.lookups.target_tokenizer.save(
