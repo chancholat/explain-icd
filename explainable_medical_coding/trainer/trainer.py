@@ -188,7 +188,7 @@ class Trainer:
         pprint("Calculating explanation decision boundary...")
         try:            
             # Use the full validation dataset
-            validation_dataset = self.dataloaders["validation"].dataset
+            validation_dataset = self.dataloaders["validation"].dataset.hf_dataset
             
             # Get the explainer based on the configured explanation method
             explanation_method = "laat"  # Default method
