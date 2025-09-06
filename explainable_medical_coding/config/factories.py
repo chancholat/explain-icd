@@ -14,7 +14,12 @@ import sys
 sys.path.append("./")
 from explainable_medical_coding.data.dataloader import BaseDataset
 from explainable_medical_coding.models import models
-from explainable_medical_coding.trainer import trainer
+# from explainable_medical_coding.trainer import trainer
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from explainable_medical_coding.trainer.trainer import Trainer  # for annotations only
+
+
 from explainable_medical_coding.utils.datatypes import Lookups
 from explainable_medical_coding.utils.lookups import create_lookups
 from explainable_medical_coding.utils.tokenizer import TargetTokenizer
@@ -227,7 +232,10 @@ def get_callbacks(config: OmegaConf) -> list[callbacks.BaseCallback]:
     return callbacks_list
 
 
-def get_trainer(name: str) -> Type[trainer.Trainer]:
+# def get_trainer(name: str) -> Type[Trainer]:
+# def get_trainer(*args, **kwargs) -> "Trainer":
+def get_trainer(name: str) -> "Trainer":
+    from explainable_medical_coding.trainer import trainer
     return getattr(trainer, name)
 
 

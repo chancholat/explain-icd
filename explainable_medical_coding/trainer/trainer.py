@@ -3,6 +3,7 @@ from collections import defaultdict
 from pathlib import Path
 from tempfile import mkdtemp
 from typing import Any, Callable, Optional
+from transformers import AutoTokenizer
 
 import pandas as pd
 import torch
@@ -18,9 +19,9 @@ from explainable_medical_coding.trainer.callbacks import BaseCallback
 from explainable_medical_coding.utils.datatypes import Lookups
 from explainable_medical_coding.utils.decision_boundary import f1_score_db_tuning
 from explainable_medical_coding.utils.settings import ID_COLUMN, TARGET_COLUMN
-from explainable_medical_coding.eval.plausibility_metrics import find_explanation_decision_boundary
 from explainable_medical_coding.utils.analysis import get_explanations
 from explainable_medical_coding.config.factories import get_explainability_method
+from explainable_medical_coding.eval.plausibility_metrics import find_explanation_decision_boundary
 
 
 class Trainer:
@@ -64,7 +65,8 @@ class Trainer:
         self.reference_model = None
         
         # Load reference model if specified in config
-        if hasattr(config.loss, 'configs') and hasattr(config.loss.configs, 'reference_model_path') and config.loss.configs.reference_model_path:
+        print(config.loss)
+        if hasattr(config.loss.configs, 'reference_model_path') and config.loss.configs.reference_model_path:
             self.load_reference_model(config.loss.configs.reference_model_path)
         
         # Add wrapper for loss function to include common parameters
@@ -76,8 +78,7 @@ class Trainer:
     def _wrapped_loss_function(self, batch, model, **kwargs):
         """Wrapper for loss function to include common parameters."""
         # Check if we're using masked_pooling_aux_loss
-        is_masked_pooling = (self._original_loss_function.__name__ == 'masked_pooling_aux_loss' or 
-                             self.config.loss.name == 'masked_pooling_aux_loss')
+        is_masked_pooling = (self.config.loss.name == 'masked_pooling_aux_loss')
         
         if is_masked_pooling:
             # Add use_token_loss from config if not explicitly provided
@@ -124,7 +125,9 @@ class Trainer:
                 return
                 
             saved_config = OmegaConf.load(model_path / "config.yaml")
-            text_tokenizer = self.lookups.text_tokenizer
+            text_tokenizer = AutoTokenizer.from_pretrained(
+                saved_config.model.configs.model_path,
+            )
             self.reference_model, _ = load_trained_model(
                 model_path,
                 saved_config,
@@ -184,7 +187,8 @@ class Trainer:
             validation_dataset = self.dataloaders["validation"].dataset
             
             # Get the LAAT explainer
-            explainer = get_explainability_method("laat")
+            # explainer = get_explainability_method("laat")
+            explainer = explainability_methods.get_laat_callable
             explainer_callable = explainer(model=model_to_use)
             
             # Get explanations for the validation dataset
@@ -217,8 +221,9 @@ class Trainer:
             self.on_fit_begin()
             
             # Check if we're using masked_pooling_aux_loss
-            is_masked_pooling = (self._original_loss_function.__name__ == 'masked_pooling_aux_loss' or 
-                                self.config.loss.name == 'masked_pooling_aux_loss')
+            # is_masked_pooling = (self._original_loss_function.__name__ == 'masked_pooling_aux_loss' or 
+            #                     self.config.loss.name == 'masked_pooling_aux_loss')
+            is_masked_pooling = (self.config.loss.name == 'masked_pooling_aux_loss')
             
             # Calculate the explanation decision boundary before training if needed
             if is_masked_pooling:
