@@ -534,6 +534,9 @@ class Trainer:
         self.model.to(device)
         for split_name in self.metric_collections.keys():
             self.metric_collections[split_name].to(device)
+
+        if self.reference_model is not None:
+            self.reference_model.to(device)
         self.device = device
         return self
 
