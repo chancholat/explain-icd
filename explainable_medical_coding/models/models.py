@@ -475,7 +475,7 @@ class PLMICD(nn.Module):
                             # For rows with no selections, keep the original attention
                             no_sel_rows = (sel.sum(dim=1) == 0)
                             if no_sel_rows.any():
-                                ea[no_sel_rows] = attention_masks[no_sel_rows]
+                                ea[no_sel_rows] = attention_masks[no_sel_rows].to(sel.dtype)
                         eff_attention = ea.to(attention_masks.dtype)
                     else:
                         # Soft mask: selected=1.0, unselected=alpha
