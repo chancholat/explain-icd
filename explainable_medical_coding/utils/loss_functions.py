@@ -599,7 +599,16 @@ def fgsm(
 
     return delta
 
-def _build_selected_mask_from_batch(batch, seq_len: int, device: torch.device, explanation_decision_boundary: float = None, reference_model=None, training_model=None, evidence_selection_strategy: str = "auto"):
+def _build_selected_mask_from_batch(
+    batch, 
+    seq_len: int, 
+    device: torch.device, 
+    explanation_decision_boundary: float = None, 
+    reference_model=None, 
+    training_model=None, 
+    evidence_selection_strategy: str = "auto",
+    explanation_method: str = "laat"
+):
     """Return a (B, L) 0/1 mask if available, else None.
     Tries batch.selected_token_mask first; otherwise uses the selected evidence selection strategy.
     
@@ -620,6 +629,9 @@ def _build_selected_mask_from_batch(batch, seq_len: int, device: torch.device, e
                 - "reference_model": Only use token attributions from the reference model
                 - "training_model": Only use token attributions from the training model
             Defaults to "auto".
+        explanation_method (str, optional): Method to use for generating token attributions.
+            Options include "laat", "alti", "attention_rollout", "gradient_attention", etc.
+            Defaults to "laat".
     
     Returns:
         torch.Tensor or None: A binary mask of shape (B, L) or None if no mask can be created.
@@ -664,11 +676,12 @@ def _build_selected_mask_from_batch(batch, seq_len: int, device: torch.device, e
                             mask[b, i] = 1.0
         return mask
     
-    # 3) Calculate based on LAAT attributions if strategy allows
+    # 3) Calculate based on model attributions if strategy allows
     if evidence_selection_strategy in ["auto", "reference_model", "training_model"]:
         import sys
         sys.path.append("./")
         from explainable_medical_coding.eval.plausibility_metrics import attributions2token_ids
+        from explainable_medical_coding.config.factories import get_explainability_method
 
         # If explanation_decision_boundary is not provided, use a default value
         if explanation_decision_boundary is None:
@@ -696,32 +709,91 @@ def _build_selected_mask_from_batch(batch, seq_len: int, device: torch.device, e
         attention_masks = batch.attention_masks
         B = input_ids.size(0)
         
+        # Map some method names to their factory keys if they differ
+        method_mapping = {
+            "gradient_attention": "grad_attention",
+            "integrated_gradients": "integrated_gradient"
+        }
+        
+        # Use the factory method to get the appropriate explainer
+        method_key = method_mapping.get(explanation_method, explanation_method)
+        
+        try:
+            # Get the explainer function from the factory
+            explainer_function = get_explainability_method(method_key)
+            # Create the callable with the model
+            explainer_callable = explainer_function(model=model_for_attributions)
+        except ValueError:
+            # If the method isn't found, default to LAAT
+            print(f"Explanation method '{explanation_method}' not found. Defaulting to LAAT.")
+            explainer_function = get_explainability_method("laat")
+            explainer_callable = explainer_function(model=model_for_attributions)
+        
         # Calculate attributions for the current batch
         mask = torch.zeros((B, seq_len), device=device, dtype=torch.float32)
         
-        # Use LAAT attributions from the model
-        with torch.no_grad():
-            _, label_attentions = model_for_attributions(input_ids, attention_masks, output_attentions=True)
-            label_attentions = torch.softmax(label_attentions, dim=-1)
-        
-        # For each example in the batch
+        # Process each example in the batch
         for b in range(B):
             # Get the target classes for this example (where targets[b] == 1)
             target_indices = torch.where(targets[b] == 1)[0]
             
             if len(target_indices) > 0:
-                # Get attributions for each target class
-                for target_idx in target_indices:
-                    # Get token attributions for this class
-                    token_attributions = label_attentions[b, target_idx, :seq_len].detach().cpu().numpy()
+                # Create input for the current example
+                current_input_ids = input_ids[b:b+1]
+                current_attention_masks = attention_masks[b:b+1] if attention_masks is not None else None
+                
+                # Get attributions using the explainer
+                try:
+                    attributions = explainer_callable(
+                        current_input_ids,
+                        target_indices,
+                        device
+                    )
                     
-                    # Select tokens with attributions above the threshold
-                    predicted_token_ids = attributions2token_ids(token_attributions, explanation_decision_boundary)
-                    
-                    # Set the mask
-                    for i in predicted_token_ids:
-                        if 0 <= i < seq_len:
-                            mask[b, i] = 1.0
+                    # For each target class
+                    for idx, target_idx in enumerate(target_indices):
+                        # Get token attributions for this class
+                        if hasattr(attributions, 'shape') and len(attributions.shape) > 1:
+                            # Handle case where attributions are returned per target class
+                            token_attributions = attributions[:seq_len, idx].numpy() if isinstance(attributions, torch.Tensor) else attributions[:seq_len, idx]
+                        else:
+                            # Handle case where only one set of attributions is returned
+                            token_attributions = attributions[:seq_len].numpy() if isinstance(attributions, torch.Tensor) else attributions[:seq_len]
+                        
+                        # Select tokens with attributions above the threshold
+                        predicted_token_ids = attributions2token_ids(token_attributions, explanation_decision_boundary)
+                        
+                        # Set the mask
+                        for i in predicted_token_ids:
+                            if 0 <= i < seq_len:
+                                mask[b, i] = 1.0
+                except Exception as e:
+                    print(f"Error calculating attributions with {explanation_method} method: {e}")
+                    # Fall back to LAAT if the explainer fails
+                    try:
+                        fallback_explainer = get_explainability_method("laat")(model=model_for_attributions)
+                        attributions = fallback_explainer(
+                            current_input_ids,
+                            target_indices,
+                            device
+                        )
+                        
+                        # For each target class
+                        for idx, target_idx in enumerate(target_indices):
+                            # Get token attributions for this class
+                            token_attributions = attributions[:seq_len, idx].numpy() if isinstance(attributions, torch.Tensor) else attributions[:seq_len, idx]
+                            
+                            # Select tokens with attributions above the threshold
+                            predicted_token_ids = attributions2token_ids(token_attributions, explanation_decision_boundary)
+                            
+                            # Set the mask
+                            for i in predicted_token_ids:
+                                if 0 <= i < seq_len:
+                                    mask[b, i] = 1.0
+                    except Exception as e2:
+                        print(f"Error with fallback explainer: {e2}")
+                        # If even the fallback fails, return None
+                        return None
         
         return mask
     
@@ -740,6 +812,7 @@ def masked_pooling_aux_loss(
     use_token_loss: bool = True,                     # NEW
     reference_model = None,                          # NEW
     evidence_selection_strategy: str = "auto",       # NEW
+    explanation_method: str = "laat",                # NEW
     **kwargs,
 ):
     """Document-level BCE + token-level auxiliary BCE on selected tokens.
@@ -755,6 +828,16 @@ def masked_pooling_aux_loss(
       - "evidence_ids": Only use evidence_input_ids from the batch
       - "reference_model": Only use token attributions from the reference model
       - "training_model": Only use token attributions from the training model
+    - explanation_method controls which method to use for token attributions:
+      - "laat": Label-wise Attention (default)
+      - "alti": Attention Last Token Importance
+      - "attention_rollout": Attention Rollout
+      - "gradient_attention": Gradient x Attention
+      - "deeplift": DeepLift
+      - "integrated_gradients": Integrated Gradients
+      - "gradient_x_input": Gradient x Input
+      - "occlusion": Occlusion
+      - "invert_label_att": Inverted Label Attention
 
     Returns: (y_probs, targets, total_loss)
     """
@@ -768,7 +851,8 @@ def masked_pooling_aux_loss(
         explanation_decision_boundary,
         reference_model,
         training_model=model,  # Pass the current model as the training model
-        evidence_selection_strategy=evidence_selection_strategy
+        evidence_selection_strategy=evidence_selection_strategy,
+        explanation_method=explanation_method
     )
 
     # Forward with masked pooling; also request token-level logits for the aux loss if using token loss

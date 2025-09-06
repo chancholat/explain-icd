@@ -106,6 +106,10 @@ class Trainer:
                 elif strategy == "training_model":
                     # Ensure we're using the training model - this is already handled by default
                     pprint("Using training model for token attributions as specified by evidence_selection_strategy")
+            
+            # Add explanation_method from config
+            if hasattr(self.config.loss, 'configs') and hasattr(self.config.loss.configs, 'explanation_method'):
+                kwargs['explanation_method'] = self.config.loss.configs.explanation_method
         
         return self._original_loss_function(batch, model=model, **kwargs)
         
@@ -186,10 +190,27 @@ class Trainer:
             # Use the full validation dataset
             validation_dataset = self.dataloaders["validation"].dataset
             
-            # Get the LAAT explainer
-            # explainer = get_explainability_method("laat")
-            explainer = explainability_methods.get_laat_callable
-            explainer_callable = explainer(model=model_to_use)
+            # Get the explainer based on the configured explanation method
+            explanation_method = "laat"  # Default method
+            if hasattr(self.config.loss, 'configs') and hasattr(self.config.loss.configs, 'explanation_method'):
+                explanation_method = self.config.loss.configs.explanation_method
+                
+            # Map some method names if they differ from factory keys
+            method_mapping = {
+                "gradient_attention": "grad_attention",
+                "integrated_gradients": "integrated_gradient"
+            }
+            method_key = method_mapping.get(explanation_method, explanation_method)
+            
+            try:
+                # Get the explainer function from the factory
+                explainer = get_explainability_method(method_key)
+                explainer_callable = explainer(model=model_to_use)
+            except ValueError:
+                # If the method isn't found, default to LAAT
+                print(f"Explanation method '{explanation_method}' not found. Defaulting to LAAT.")
+                explainer = get_explainability_method("laat")
+                explainer_callable = explainer(model=model_to_use)
             
             # Get explanations for the validation dataset
             explanations_val_df = get_explanations(

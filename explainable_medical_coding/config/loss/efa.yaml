@@ -8,3 +8,4 @@ configs:
   use_token_loss: true # Whether to compute the token-level auxiliary loss
   reference_model_path: null # Path to a reference model checkpoint to compute explanation thresholds
   evidence_selection_strategy: "auto" # Strategy for evidence selection: "auto", "evidence_ids", "reference_model", "training_model"
+  explanation_method: "laat" # Method to use for token attributions: "laat", "alti", "attention_rollout", "gradient_attention", "deeplift", "integrated_gradients", etc.
