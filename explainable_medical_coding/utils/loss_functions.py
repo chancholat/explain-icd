@@ -709,18 +709,9 @@ def _build_selected_mask_from_batch(
         attention_masks = batch.attention_masks
         B = input_ids.size(0)
         
-        # Map some method names to their factory keys if they differ
-        method_mapping = {
-            "gradient_attention": "grad_attention",
-            "integrated_gradients": "integrated_gradient"
-        }
-        
-        # Use the factory method to get the appropriate explainer
-        method_key = method_mapping.get(explanation_method, explanation_method)
-        
         try:
             # Get the explainer function from the factory
-            explainer_function = get_explainability_method(method_key)
+            explainer_function = get_explainability_method(explanation_method)
             # Create the callable with the model
             explainer_callable = explainer_function(model=model_for_attributions)
         except ValueError:
@@ -734,16 +725,34 @@ def _build_selected_mask_from_batch(
         
         # Process each example in the batch
         for b in range(B):
-            # Get the target classes for this example (where targets[b] == 1)
-            target_indices = torch.where(targets[b] == 1)[0]
+            # Use the original target IDs if available, otherwise fall back to one-hot extraction
+            if hasattr(batch, "original_target_ids") and batch.original_target_ids is not None:
+                ground_truth_target_indices = batch.original_target_ids[b]
+            else:
+                # Fall back to extracting from one-hot encoded targets
+                ground_truth_target_indices = torch.where(targets[b] == 1)[0]
             
-            if len(target_indices) > 0:
-                # Create input for the current example
+            # Get model predictions for current example to identify predicted targets
+            with torch.no_grad():
                 current_input_ids = input_ids[b:b+1]
                 current_attention_masks = attention_masks[b:b+1] if attention_masks is not None else None
-                
+                logits = model_for_attributions(current_input_ids, current_attention_masks)
+                y_probs = torch.sigmoid(logits)[0]  # Get probabilities for the current example
+                predicted_target_indices = torch.where(y_probs > explanation_decision_boundary)[0]
+            
+            # Combine ground truth and predicted targets (removing duplicates)
+            # Ensure all indices are on CPU and convert to Python list for set operations
+            ground_truth_list = ground_truth_target_indices.cpu().tolist() if isinstance(ground_truth_target_indices, torch.Tensor) else ground_truth_target_indices
+            predicted_list = predicted_target_indices.cpu().tolist() if isinstance(predicted_target_indices, torch.Tensor) else predicted_target_indices
+            
+            target_indices = torch.tensor(list(set(ground_truth_list) | set(predicted_list)))
+            
+            if len(target_indices) > 0:
                 # Get attributions using the explainer
                 try:
+                    # Call explainer to get attributions for the specified target indices
+                    # Note: The explainer returns a tensor of shape [sequence_length, len(target_indices)]
+                    # where each column corresponds to one of the target indices in the same order
                     attributions = explainer_callable(
                         current_input_ids,
                         target_indices,
@@ -753,12 +762,14 @@ def _build_selected_mask_from_batch(
                     # For each target class
                     for idx, target_idx in enumerate(target_indices):
                         # Get token attributions for this class
-                        if hasattr(attributions, 'shape') and len(attributions.shape) > 1:
+                        # The idx here corresponds to the position in the attributions tensor
+                        # which matches the position of target_idx in target_indices
+                        if isinstance(attributions, torch.Tensor) and len(attributions.shape) > 1:
                             # Handle case where attributions are returned per target class
-                            token_attributions = attributions[:seq_len, idx].numpy() if isinstance(attributions, torch.Tensor) else attributions[:seq_len, idx]
+                            token_attributions = attributions[:seq_len, idx].cpu().numpy() if attributions.device.type != 'cpu' else attributions[:seq_len, idx].numpy()
                         else:
                             # Handle case where only one set of attributions is returned
-                            token_attributions = attributions[:seq_len].numpy() if isinstance(attributions, torch.Tensor) else attributions[:seq_len]
+                            token_attributions = attributions[:seq_len].cpu().numpy() if hasattr(attributions, 'device') and attributions.device.type != 'cpu' else attributions[:seq_len]
                         
                         # Select tokens with attributions above the threshold
                         predicted_token_ids = attributions2token_ids(token_attributions, explanation_decision_boundary)
@@ -772,6 +783,9 @@ def _build_selected_mask_from_batch(
                     # Fall back to LAAT if the explainer fails
                     try:
                         fallback_explainer = get_explainability_method("laat")(model=model_for_attributions)
+                        # Call fallback explainer to get attributions for the specified target indices
+                        # Note: The explainer returns a tensor of shape [sequence_length, len(target_indices)]
+                        # where each column corresponds to one of the target indices in the same order
                         attributions = fallback_explainer(
                             current_input_ids,
                             target_indices,
@@ -780,8 +794,13 @@ def _build_selected_mask_from_batch(
                         
                         # For each target class
                         for idx, target_idx in enumerate(target_indices):
-                            # Get token attributions for this class
-                            token_attributions = attributions[:seq_len, idx].numpy() if isinstance(attributions, torch.Tensor) else attributions[:seq_len, idx]
+                            # Get token attributions for this class with proper handling
+                            # The idx here corresponds to the position in the attributions tensor
+                            # which matches the position of target_idx in target_indices
+                            if isinstance(attributions, torch.Tensor) and len(attributions.shape) > 1:
+                                token_attributions = attributions[:seq_len, idx].cpu().numpy() if attributions.device.type != 'cpu' else attributions[:seq_len, idx].numpy()
+                            else:
+                                token_attributions = attributions[:seq_len].cpu().numpy() if hasattr(attributions, 'device') and attributions.device.type != 'cpu' else attributions[:seq_len]
                             
                             # Select tokens with attributions above the threshold
                             predicted_token_ids = attributions2token_ids(token_attributions, explanation_decision_boundary)

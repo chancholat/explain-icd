@@ -28,7 +28,10 @@ class Batch:
     attention_masks: Optional[torch.Tensor] = None
     texts: Optional[list[str]] = None
     teacher_logits: Optional[torch.Tensor] = None
-
+    
+    # Original target IDs before one-hot encoding, useful for attribution computation
+    original_target_ids: Optional[list[torch.Tensor]] = None
+    
     evidence_input_ids: Optional[Sequence[Sequence[Sequence[int]]]] = None
 
     def to(self, device: Any) -> "Batch":
@@ -46,6 +49,10 @@ class Batch:
             self.attention_masks = self.attention_masks.to(device, non_blocking=True)
         if self.teacher_logits is not None:
             self.teacher_logits = self.teacher_logits.to(device, non_blocking=True)
+        # Handle original target IDs if present
+        if self.original_target_ids is not None:
+            self.original_target_ids = [ids.to(device, non_blocking=True) if isinstance(ids, torch.Tensor) else ids
+                                      for ids in self.original_target_ids]
         return self
 
     # custom memory pinning method on custom type
@@ -56,4 +63,8 @@ class Batch:
             self.attention_masks = self.attention_masks.pin_memory()
         if self.teacher_logits is not None:
             self.teacher_logits = self.teacher_logits.pin_memory()
+        # Handle original target IDs if present
+        if self.original_target_ids is not None:
+            self.original_target_ids = [ids.pin_memory() if isinstance(ids, torch.Tensor) else ids
+                                       for ids in self.original_target_ids]
         return self

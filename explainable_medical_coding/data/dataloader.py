@@ -72,6 +72,11 @@ class BaseDataset(torch.utils.data.Dataset):
 
         input_ids = self.pad(sequence=batch["input_ids"], pad_id=self.pad_token_id)
         target_ids_list = batch["target_ids"]
+        
+        # Make a copy of the original target IDs for later use in attribution calculation
+        original_target_ids = [ids.clone() if isinstance(ids, torch.Tensor) else torch.tensor(ids) 
+                              for ids in target_ids_list]
+        
         if self.target_tokenizer.autoregressive:
             # Check if sos, eos or pad tokens are None types
             if (
@@ -131,4 +136,5 @@ class BaseDataset(torch.utils.data.Dataset):
             texts=texts,
             evidence_input_ids=evidence_input_ids,
             teacher_logits=teacher_logits,
+            original_target_ids=original_target_ids,  # Add the original target IDs
         )
