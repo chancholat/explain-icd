@@ -436,6 +436,7 @@ class PLMICD(nn.Module):
             mask_pooling: bool = True,                      # NEW: control whether to mask pooling
             soft_alpha: float = 0.0,                        # NEW: soft weight for unselected tokens in pooling (0.0 = hard mask)
             fallback_to_full_attention_if_empty: bool = True,  # NEW: if a sample selects nothing, keep original attention for that sample
+            window_stride: int = 0,                         # NEW: how many tokens to expand on each side of a selected token
         ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
             """
             Encoder once; optionally block gradients for unselected tokens; optionally mask pooling.
@@ -443,45 +444,72 @@ class PLMICD(nn.Module):
             - If mask_pooling=True and 0<soft_alpha<1, unselected tokens get weight=soft_alpha at pooling.
             - If mask_pooling=False, pooling uses the original attention mask (full context),
               but you can still stop gradients on unselected tokens.
+            - If window_stride>0, selections are expanded to include window_stride tokens on each side.
+              This expansion applies to both gradient preservation and pooling weights.
             """
             token_reps = self.encoder(input_ids, attention_masks)  # (B, L, H)
-            # print("token reps:", token_reps.shape)
             eff_attention = attention_masks  # (B, L)
             if selected_token_mask is not None:
                 sel = selected_token_mask.to(token_reps.dtype)
                 pad_len = token_reps.size(1) - sel.size(1)
                 if pad_len > 0:
                     pad_sel = torch.nn.functional.pad(sel, (0, pad_len), value=0)
-                # print("sel:", sel.shape)
-                # print("sel unsqueeeze(-1):", sel.unsqueeze(-1).shape)
                 sel = sel[:, : token_reps.size(1)]  # safety clip
                 B, L = sel.shape
 
-                # Row mask: which samples have at least one selected token
-                has_any = (sel.sum(dim=1) > 0).to(token_reps.dtype).view(B, 1, 1)  # (B,1,1)
-                # print("has any:", has_any.shape)
+                # Apply window effect - expand selections by window_stride on both sides
+                if window_stride > 0:
+                    # Create an expanded mask using a more efficient approach
+                    expanded_sel = sel.clone()
+                    
+                    # We'll use a 1D convolution as an efficient way to implement the window effect
+                    # Create a convolution kernel of all ones with size 2*window_stride+1
+                    kernel = torch.ones(1, 1, 2*window_stride+1, device=sel.device)
+                    
+                    # Convert the selection mask to a format suitable for 1D convolution
+                    sel_for_conv = sel.unsqueeze(1).float()  # [B, 1, L]
+                    
+                    # Perform the convolution with appropriate padding
+                    conv_result = torch.nn.functional.conv1d(
+                        sel_for_conv, 
+                        kernel, 
+                        padding=window_stride
+                    )  # [B, 1, L]
+                    
+                    # If any value in the window is 1, we consider it selected
+                    window_sel = (conv_result > 0).squeeze(1).to(sel.dtype)
+                else:
+                    window_sel = sel
 
+                # Row mask: which samples have at least one selected token
+                has_any = (window_sel.sum(dim=1) > 0).to(token_reps.dtype).view(B, 1, 1)  # (B,1,1)
+
+                # Create padded version of window_sel if needed
+                if pad_len > 0:
+                    pad_window_sel = torch.nn.functional.pad(window_sel, (0, pad_len), value=0)
+                else:
+                    pad_window_sel = window_sel
 
                 # Optional stop-gradient on unselected tokens (only for rows that have selections)
                 if stop_gradient_unselected:
                     token_reps = token_reps * has_any + token_reps * (1.0 - has_any)  # no-op to ensure shape
-                    token_reps = token_reps * pad_sel.unsqueeze(-1) + token_reps.detach() * (1.0 - pad_sel.unsqueeze(-1))
+                    token_reps = token_reps * pad_window_sel.unsqueeze(-1) + token_reps.detach() * (1.0 - pad_window_sel.unsqueeze(-1))
 
                 if mask_pooling:
                     if soft_alpha <= 0.0:
                         # Hard mask: selected=1, unselected=0
-                        ea = (attention_masks.to(sel.dtype) * sel)
+                        ea = (attention_masks.to(window_sel.dtype) * window_sel)
                         if fallback_to_full_attention_if_empty:
                             # For rows with no selections, keep the original attention
-                            no_sel_rows = (sel.sum(dim=1) == 0)
+                            no_sel_rows = (window_sel.sum(dim=1) == 0)
                             if no_sel_rows.any():
-                                ea[no_sel_rows] = attention_masks[no_sel_rows].to(sel.dtype)
+                                ea[no_sel_rows] = attention_masks[no_sel_rows].to(window_sel.dtype)
                         eff_attention = ea.to(attention_masks.dtype)
                     else:
                         # Soft mask: selected=1.0, unselected=alpha
-                        soft_w = soft_alpha + (1.0 - soft_alpha) * sel  # (B, L)
+                        soft_w = soft_alpha + (1.0 - soft_alpha) * window_sel  # (B, L)
                         if fallback_to_full_attention_if_empty:
-                            no_sel_rows = (sel.sum(dim=1) == 0)
+                            no_sel_rows = (window_sel.sum(dim=1) == 0)
                             if no_sel_rows.any():
                                 soft_w[no_sel_rows] = soft_alpha   # keep original attention for those rows
                         ea = (attention_masks.to(soft_w.dtype) * soft_w)

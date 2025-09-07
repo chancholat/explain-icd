@@ -732,20 +732,11 @@ def _build_selected_mask_from_batch(
                 # Fall back to extracting from one-hot encoded targets
                 ground_truth_target_indices = torch.where(targets[b] == 1)[0]
             
-            # Get model predictions for current example to identify predicted targets
-            with torch.no_grad():
-                current_input_ids = input_ids[b:b+1]
-                current_attention_masks = attention_masks[b:b+1] if attention_masks is not None else None
-                logits = model_for_attributions(current_input_ids, current_attention_masks)
-                y_probs = torch.sigmoid(logits)[0]  # Get probabilities for the current example
-                predicted_target_indices = torch.where(y_probs > explanation_decision_boundary)[0]
             
-            # Combine ground truth and predicted targets (removing duplicates)
-            # Ensure all indices are on CPU and convert to Python list for set operations
+            current_input_ids = input_ids[b:b+1]
+            current_attention_masks = attention_masks[b:b+1] if attention_masks is not None else None            
             ground_truth_list = ground_truth_target_indices.cpu().tolist() if isinstance(ground_truth_target_indices, torch.Tensor) else ground_truth_target_indices
-            predicted_list = predicted_target_indices.cpu().tolist() if isinstance(predicted_target_indices, torch.Tensor) else predicted_target_indices
-            
-            target_indices = torch.tensor(list(set(ground_truth_list) | set(predicted_list)))
+            target_indices = torch.tensor(ground_truth_list)
             
             if len(target_indices) > 0:
                 # Get attributions using the explainer
@@ -832,6 +823,7 @@ def masked_pooling_aux_loss(
     reference_model = None,                          # NEW
     evidence_selection_strategy: str = "auto",       # NEW
     explanation_method: str = "laat",                # NEW
+    window_stride: int = 0,                          # NEW
     **kwargs,
 ):
     """Document-level BCE + token-level auxiliary BCE on selected tokens.
@@ -885,6 +877,7 @@ def masked_pooling_aux_loss(
         mask_pooling=mask_pooling,
         soft_alpha=soft_alpha,
         fallback_to_full_attention_if_empty=fallback_to_full_attention_if_empty,
+        window_stride=window_stride,
     )
 
     # Primary document-level loss

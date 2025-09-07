@@ -110,6 +110,14 @@ class Trainer:
             # Add explanation_method from config
             if hasattr(self.config.loss, 'configs') and hasattr(self.config.loss.configs, 'explanation_method'):
                 kwargs['explanation_method'] = self.config.loss.configs.explanation_method
+                
+            # NEW: Pass all remaining configs from self.config.loss.configs as kwargs
+            if hasattr(self.config.loss, 'configs'):
+                # Convert OmegaConf to dict and update kwargs with all config params
+                for key, value in OmegaConf.to_container(self.config.loss.configs).items():
+                    # Don't override already set parameters
+                    if key not in kwargs:
+                        kwargs[key] = value
         
         return self._original_loss_function(batch, model=model, **kwargs)
         
