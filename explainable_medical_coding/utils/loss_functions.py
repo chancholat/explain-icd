@@ -733,7 +733,7 @@ def _build_selected_mask_from_batch(
                 ground_truth_target_indices = torch.where(targets[b] == 1)[0]
             
             
-            current_input_ids = input_ids[b:b+1]
+            current_input_ids = input_ids[b:b+1].detach()  # Shape (1, seq_len)
             current_attention_masks = attention_masks[b:b+1] if attention_masks is not None else None            
             ground_truth_list = ground_truth_target_indices.cpu().tolist() if isinstance(ground_truth_target_indices, torch.Tensor) else ground_truth_target_indices
             target_indices = torch.tensor(ground_truth_list)

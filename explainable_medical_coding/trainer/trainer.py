@@ -222,7 +222,7 @@ class Trainer:
             
             # Get explanations for the validation dataset
             explanations_val_df = get_explanations(
-                model=model_to_use,
+                model=model_to_use, 
                 model_path=self.experiment_path,
                 dataset=validation_dataset,
                 explainer=explainer_callable,
