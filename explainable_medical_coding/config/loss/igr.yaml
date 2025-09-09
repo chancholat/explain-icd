@@ -1,4 +1,4 @@
 name: double_backpropagation_loss
 configs:
-  lambda_1: 0.001
+  lambda_1: 0.00001
   p: 1

@@ -18,3 +18,4 @@ os.makedirs('./models')
 # Tải toàn bộ repository về thư mục local
 snapshot_download(repo_id="ChanBeDu/PLM-ICD-seed10", repo_type="model", local_dir="./models")
 snapshot_download(repo_id="ChanBeDu/reference_model", local_dir="./models/")
+print("[INFO] Downloaded models from Huggingface to ./models")

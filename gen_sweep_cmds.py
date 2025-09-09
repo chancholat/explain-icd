@@ -3,7 +3,7 @@ import itertools
 # --- Fixed parts ---
 BASE_CMD = [
     "python train_plm.py",
-    "experiment=mdace_icd9/plm_efa",
+    "experiment=mdace_icd9_code/plm_efa",
     "gpu=0",
     "loss.configs.evidence_selection_strategy=reference_model",
     "loss.configs.fallback_to_full_attention_if_empty=False",
@@ -58,4 +58,3 @@ for lr, lam, method, ref, alpha in jobs:
 
 # Then run the shell script file:
 # bash sweep_cmds.sh
-
