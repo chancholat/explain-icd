@@ -685,6 +685,7 @@ def _build_selected_mask_from_batch(
 
         # If explanation_decision_boundary is not provided, use a default value
         if explanation_decision_boundary is None:
+            print("WARNING: Using default explanation_decision_boundary of 0.05")
             explanation_decision_boundary = 0.05
             
         # Determine which model to use for attributions based on strategy
@@ -699,6 +700,7 @@ def _build_selected_mask_from_batch(
             if reference_model is not None:
                 model_for_attributions = reference_model
             elif training_model is not None:
+                print("WARNING: Using training_model for attributions")
                 model_for_attributions = training_model
         
         if model_for_attributions is None:
@@ -733,7 +735,7 @@ def _build_selected_mask_from_batch(
                 ground_truth_target_indices = torch.where(targets[b] == 1)[0]
             
             
-            current_input_ids = input_ids[b:b+1].detach()  # Shape (1, seq_len)
+            current_input_ids = input_ids[b:b+1] # Shape (1, seq_len)
             current_attention_masks = attention_masks[b:b+1] if attention_masks is not None else None            
             ground_truth_list = ground_truth_target_indices.cpu().tolist() if isinstance(ground_truth_target_indices, torch.Tensor) else ground_truth_target_indices
             target_indices = torch.tensor(ground_truth_list)
@@ -757,11 +759,10 @@ def _build_selected_mask_from_batch(
                         # which matches the position of target_idx in target_indices
                         if isinstance(attributions, torch.Tensor) and len(attributions.shape) > 1:
                             # Handle case where attributions are returned per target class
-                            token_attributions = attributions[:seq_len, idx].cpu().numpy() if attributions.device.type != 'cpu' else attributions[:seq_len, idx].numpy()
+                            token_attributions = attributions[:seq_len, idx].detach().cpu().numpy() if attributions.device.type != 'cpu' else attributions[:seq_len, idx].detach().numpy()
                         else:
                             # Handle case where only one set of attributions is returned
-                            token_attributions = attributions[:seq_len].cpu().numpy() if hasattr(attributions, 'device') and attributions.device.type != 'cpu' else attributions[:seq_len]
-                        
+                            token_attributions = attributions[:seq_len].detach().cpu().numpy() if hasattr(attributions, 'device') and attributions.device.type != 'cpu' else attributions[:seq_len].detach()
                         # Select tokens with attributions above the threshold
                         predicted_token_ids = attributions2token_ids(token_attributions, explanation_decision_boundary)
                         
@@ -852,6 +853,9 @@ def masked_pooling_aux_loss(
 
     Returns: (y_probs, targets, total_loss)
     """
+
+    # check the arguments
+    # print(f"masked_pooling_aux_loss called with lambda_aux={lambda_aux}, stop_gradient_unselected={stop_gradient_unselected}, mask_pooling={mask_pooling}, soft_alpha={soft_alpha}, fallback_to_full_attention_if_empty={fallback_to_full_attention_if_empty}, explanation_decision_boundary={explanation_decision_boundary}, use_token_loss={use_token_loss}, evidence_selection_strategy={evidence_selection_strategy}, explanation_method={explanation_method}, window_stride={window_stride}")
     input_ids, targets, attention_masks = batch.input_ids, batch.targets, batch.attention_masks
 
     seq_len = input_ids.size(1)
@@ -872,7 +876,7 @@ def masked_pooling_aux_loss(
         attention_masks=attention_masks,
         selected_token_mask=sel_mask,
         stop_gradient_unselected=stop_gradient_unselected,
-        return_token_logits=use_token_loss,
+        return_token_logits=lambda_aux>0,
         output_attentions=False,
         mask_pooling=mask_pooling,
         soft_alpha=soft_alpha,
@@ -885,7 +889,8 @@ def masked_pooling_aux_loss(
     total_loss = doc_loss
 
     # Auxiliary token-level loss (only if we have a selection mask, token logits, and token loss is enabled)
-    if use_token_loss and (sel_mask is not None) and (tok_logits is not None):
+    # if use_token_loss and (sel_mask is not None) and (tok_logits is not None):
+    if lambda_aux > 0 and (sel_mask is not None) and (tok_logits is not None):
         B, L, C = tok_logits.shape
         tgt_broadcast = targets.unsqueeze(1).expand(B, L, C)  # (B, L, C)
 
