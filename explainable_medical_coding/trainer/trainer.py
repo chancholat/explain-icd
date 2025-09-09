@@ -140,6 +140,7 @@ class Trainer:
             text_tokenizer = AutoTokenizer.from_pretrained(
                 saved_config.model.configs.model_path,
             )
+            self.reference_text_tokenizer = text_tokenizer
             self.reference_model, _ = load_trained_model(
                 model_path,
                 saved_config,
@@ -153,7 +154,7 @@ class Trainer:
             self.reference_model = None
 
     def calculate_explanation_decision_boundary(self) -> float:
-        """Calculate the explanation decision boundary using the validation dataset.
+        """Calculate the explanation decision boundary using the validation of mdace_icd9.
         This function should be called once during initialization and the result will be cached.
         It uses the reference model if available, otherwise uses the training model.
         The calculation respects the evidence_selection_strategy configuration.
@@ -195,9 +196,16 @@ class Trainer:
 
         pprint("Calculating explanation decision boundary...")
         try:            
-            # Use the full validation dataset
-            validation_dataset = self.dataloaders["validation"].dataset.hf_dataset
             
+            # validation_dataset = self.dataloaders["validation"].dataset.hf_dataset
+            from explainable_medical_coding.utils.loaders import load_and_prepare_dataset
+            # Use the mdace_icd9 validation dataset for threshold calculation
+            dataset_path = Path("explainable_medical_coding/datasets/mdace_inpatient_icd9.py")
+            dataset = load_and_prepare_dataset(
+                    dataset_path, self.reference_text_tokenizer, self.lookups.target_tokenizer
+            )
+            validation_dataset = dataset["validation"]  
+
             # Get the explainer based on the configured explanation method
             explanation_method = "laat"  # Default method
             if hasattr(self.config.loss, 'configs') and hasattr(self.config.loss.configs, 'explanation_method'):
