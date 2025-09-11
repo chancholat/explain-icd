@@ -66,7 +66,7 @@ def load_and_prepare_dataset(
     max_input_length: int = 6000,
     target_columns: list[str] = ["diagnosis_codes", "procedure_codes"],
 ) -> Dataset:
-    dataset = load_dataset(str(dataset_path))
+    dataset = load_dataset(str(dataset_path), trust_remote_code=True)
 
     # tokenize text
     dataset = dataset.map(

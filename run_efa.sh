@@ -27,7 +27,7 @@ LRS=(5e-5 1e-5)                          # $1 -> 0..1
 SOFT_ALPHAS=(0.5 0.3 0.1 0.01)           # $2 -> 0..3
 
 # Nested loops (no array task)
-LAMBDAS=(1.0 0 0.5 0.1 0.05 0.01 0.005 0.001 0.0001 0.00001 0.000001)
+LAMBDAS=(0.0001 0.00001 0.000001 0.01 0.005 0.001)
 METHODS=(laat grad_attention)
 REFS=("models/supervised/ym0o7co8" "models/suppervised_attention_2")
 
@@ -63,9 +63,9 @@ JID="${SLURM_JOB_ID:-local$$}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
 # ---------------- Nested loops (no array) ----------------
-for LAMBDA in "${LAMBDAS[@]}"; do
+for REF in "${REFS[@]}"; do
   for METHOD in "${METHODS[@]}"; do
-    for REF in "${REFS[@]}"; do
+    for LAMBDA in "${LAMBDAS[@]}"; do 
       REF_BASENAME="$(basename "$REF")"
       TAG="lr${LR}_lam${LAMBDA}_sa${SOFT}_${METHOD}_${REF_BASENAME}"
       LOG="logs/plm_${TAG}_job${JID}_${STAMP}.out"

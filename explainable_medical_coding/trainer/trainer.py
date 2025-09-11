@@ -600,7 +600,7 @@ class Trainer:
         Args:
             file_name (str): The name of the checkpoint file
         """
-        checkpoint = torch.load(self.experiment_path / file_name)
+        checkpoint = torch.load(self.experiment_path / file_name, weights_only=False)
         self.model.load_state_dict(checkpoint["model"])
         self.optimizer.load_state_dict(checkpoint["optimizer"])
         self.gradient_scaler.load_state_dict(checkpoint["scaler"])
