@@ -128,6 +128,7 @@ class Trainer:
             reference_model_path (str): Path to the reference model checkpoint
         """
         from explainable_medical_coding.utils.loaders import load_trained_model
+        from explainable_medical_coding.utils.tokenizer import TargetTokenizer
         
         pprint(f"Loading reference model from {reference_model_path}")
         try:
@@ -148,6 +149,9 @@ class Trainer:
                 device=self.device,
             )
             self.reference_model.eval()  # Ensure model is in evaluation mode
+            ref_target_tokenizer = TargetTokenizer(autoregressive=False)
+            ref_target_tokenizer.load(model_path / "target_tokenizer.json")
+            self.reference_target_tokenizer = ref_target_tokenizer
             pprint("Reference model loaded successfully")
         except Exception as e:
             pprint(f"Error loading reference model: {e}")
@@ -202,7 +206,7 @@ class Trainer:
             # Use the mdace_icd9 validation dataset for threshold calculation
             dataset_path = Path("explainable_medical_coding/datasets/mdace_inpatient_icd9.py")
             dataset = load_and_prepare_dataset(
-                    dataset_path, self.reference_text_tokenizer, self.lookups.target_tokenizer
+                    dataset_path, self.reference_text_tokenizer, self.reference_target_tokenizer
             )
             validation_dataset = dataset["validation"]  
 
@@ -245,7 +249,7 @@ class Trainer:
             
             pprint(f"Explanation decision boundary calculated: {explanation_decision_boundary}")
             return explanation_decision_boundary
-        except Exception as e:
+        except Exception as e:  
             pprint(f"Error calculating explanation decision boundary: {e}")
             # Fallback to a default value if calculation fails
             self.explanation_decision_boundary = 0.05
