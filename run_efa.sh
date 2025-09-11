@@ -29,7 +29,7 @@ SOFT_ALPHAS=(0.5 0.3 0.1 0.01)           # $2 -> 0..3
 # Nested loops (no array task)
 LAMBDAS=(0.0001 0.00001 0.000001 0.01 0.005 0.001)
 METHODS=(laat grad_attention)
-REFS=("models/supervised/ym0o7co8" "models/suppervised_attention_2")
+REFS=("models/supervised/ym0o7co8" "models/supervised_attention_full_target")
 
 # ---------------- Parse CLI args ----------------
 if [[ $# -lt 2 ]]; then

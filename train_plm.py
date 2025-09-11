@@ -91,6 +91,11 @@ def main(cfg: OmegaConf) -> None:
         LOGGER.info("Loading Tokenizer from model_path")
         target_tokenizer.load(model_path / "target_tokenizer.json")
 
+
+    # This lines are to train the reference with the full target tokenizer
+    # reference_training_path = Path("models/supervised/ym0o7co8")
+    # target_tokenizer.load(reference_training_path / "target_tokenizer.json")
+
     # convert targets to target ids
     dataset = dataset.map(
         lambda x: {"target_ids": target_tokenizer(x[TARGET_COLUMN])},
