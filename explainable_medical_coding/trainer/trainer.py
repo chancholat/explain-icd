@@ -238,7 +238,7 @@ class Trainer:
                 model_path=self.experiment_path,
                 dataset=validation_dataset,
                 explainer=explainer_callable,
-                target_tokenizer=self.lookups.target_tokenizer,
+                target_tokenizer=self.reference_target_tokenizer,
                 cache=True,
                 cache_path=Path(".cache")
             )
