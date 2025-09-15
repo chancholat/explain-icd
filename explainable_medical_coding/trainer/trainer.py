@@ -150,7 +150,7 @@ class Trainer:
             )
             self.reference_model.eval()  # Ensure model is in evaluation mode
             ref_target_tokenizer = TargetTokenizer(autoregressive=False)
-            ref_target_tokenizer.load(model_path / "target_tokenizer.json")
+            # ref_target_tokenizer.load(model_path / "target_tokenizer.json")
             self.reference_target_tokenizer = ref_target_tokenizer
             pprint("Reference model loaded successfully")
         except Exception as e:

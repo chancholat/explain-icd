@@ -48,6 +48,7 @@ def main(cfg: OmegaConf) -> None:
     target_columns = list(cfg.data.target_columns)
     dataset_path = Path(cfg.data.dataset_path)
     model_path = Path(cfg.load_model) if cfg.load_model is not None else None
+    reference_model_path = Path(cfg.loss.reference_model_path) if cfg.loss.reference_model_path is not None else None
     dataset = load_dataset(str(dataset_path), trust_remote_code=True)
 
     text_tokenizer = AutoTokenizer.from_pretrained(
@@ -84,7 +85,10 @@ def main(cfg: OmegaConf) -> None:
 
     autoregressive = bool(cfg.model.autoregressive)
     target_tokenizer = TargetTokenizer(autoregressive=autoregressive)
-    if model_path is None:
+    if reference_model_path is not None:
+        LOGGER.info("Loading Target Tokenizer from reference_model_path")
+        target_tokenizer.load(reference_model_path / "target_tokenizer.json")
+    elif model_path is None:
         unique_targets = get_unique_targets(dataset)
         target_tokenizer.fit(unique_targets)
     else:

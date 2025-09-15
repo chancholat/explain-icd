@@ -80,7 +80,7 @@ Usage (inject-only):
 
 Examples:
   sbatch $0 0 1 0
-  sbatch $0 3e-5 laat models/supervised/ym0o7co8
+  sbatch $0 3e-5 laat   
 EOF
 }
 
