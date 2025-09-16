@@ -607,7 +607,8 @@ def _build_selected_mask_from_batch(
     reference_model=None, 
     training_model=None, 
     evidence_selection_strategy: str = "auto",
-    explanation_method: str = "laat"
+    explanation_method: str = "laat",
+    text_tokenizer=None,
 ):
     """Return a (B, L) 0/1 mask if available, else None.
     Tries batch.selected_token_mask first; otherwise uses the selected evidence selection strategy.
@@ -766,6 +767,20 @@ def _build_selected_mask_from_batch(
                         # Select tokens with attributions above the threshold
                         predicted_token_ids = attributions2token_ids(token_attributions, explanation_decision_boundary)
                         
+                        
+                        # # convert back the token ids to token and print them
+                        # if text_tokenizer is not None:
+                        #     tokens = text_tokenizer.convert_ids_to_tokens(predicted_token_ids)
+                        #     print(f"\nPredicted tokens for target index {target_idx.item() if isinstance(target_idx, torch.Tensor) else target_idx}: {tokens}\n")
+                        #     # Print the evidence ids converted to tokens as well if available
+                        #     if evid is not None and b < len(evid):
+                        #         lists_per_label = evid[b] or []
+                        #         for label_idx, token_idx_list in enumerate(lists_per_label or []):
+                        #             if token_idx_list:
+                        #                 evidence_tokens = text_tokenizer.convert_ids_to_tokens(token_idx_list)
+                        #                 print(f"Evidence tokens for label index {label_idx}: {evidence_tokens}")
+
+
                         # Set the mask
                         for i in predicted_token_ids:
                             if 0 <= i < seq_len:
@@ -867,7 +882,8 @@ def masked_pooling_aux_loss(
         reference_model,
         training_model=model,  # Pass the current model as the training model
         evidence_selection_strategy=evidence_selection_strategy,
-        explanation_method=explanation_method
+        explanation_method=explanation_method,
+        **kwargs
     )
 
     # Forward with masked pooling; also request token-level logits for the aux loss if using token loss

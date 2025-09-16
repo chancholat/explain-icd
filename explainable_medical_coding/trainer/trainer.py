@@ -12,6 +12,9 @@ from rich.pretty import pprint
 from rich.progress import track
 from torch.utils.data import DataLoader
 import sys
+import numpy as np
+import polars as pl
+
 
 sys.path.append("./")
 from explainable_medical_coding.eval.metrics import MetricCollection
@@ -74,7 +77,7 @@ class Trainer:
         self.loss_function = self._wrapped_loss_function
         
         self.on_initialisation_end()
-        
+
     def _wrapped_loss_function(self, batch, model, **kwargs):
         """Wrapper for loss function to include common parameters."""
         # Check if we're using masked_pooling_aux_loss
@@ -110,6 +113,15 @@ class Trainer:
             # Add explanation_method from config
             if hasattr(self.config.loss, 'configs') and hasattr(self.config.loss.configs, 'explanation_method'):
                 kwargs['explanation_method'] = self.config.loss.configs.explanation_method
+
+
+            # Add text_tokenizer if available in lookups
+            text_tokenizer = AutoTokenizer.from_pretrained(
+                # cfg.model.configs.model_path,
+                self.config.model.configs.model_path,
+            )   
+
+            kwargs['text_tokenizer'] = text_tokenizer
                 
             # NEW: Pass all remaining configs from self.config.loss.configs as kwargs
             if hasattr(self.config.loss, 'configs'):
@@ -142,7 +154,7 @@ class Trainer:
                 saved_config.model.configs.model_path,
             )
             self.reference_text_tokenizer = text_tokenizer
-            self.reference_model, _ = load_trained_model(
+            self.reference_model, self.ref_decision_boundary = load_trained_model(
                 model_path,
                 saved_config,
                 pad_token_id=text_tokenizer.pad_token_id,
@@ -166,8 +178,6 @@ class Trainer:
         Returns:
             float: The calculated explanation decision boundary
         """
-        if self.explanation_decision_boundary is not None:
-            return self.explanation_decision_boundary
 
         # Determine which model to use based on evidence_selection_strategy
         model_to_use = self.model
@@ -212,19 +222,12 @@ class Trainer:
 
             # Get the explainer based on the configured explanation method
             explanation_method = "laat"  # Default method
-            if hasattr(self.config.loss, 'configs') and hasattr(self.config.loss.configs, 'explanation_method'):
+            if hasattr(self.config.loss.configs, 'explanation_method'):
                 explanation_method = self.config.loss.configs.explanation_method
-                
-            # Map some method names if they differ from factory keys
-            method_mapping = {
-                "gradient_attention": "grad_attention",
-                "integrated_gradients": "integrated_gradient"
-            }
-            method_key = method_mapping.get(explanation_method, explanation_method)
             
             try:
                 # Get the explainer function from the factory
-                explainer = get_explainability_method(method_key)
+                explainer = get_explainability_method(explanation_method)
                 explainer_callable = explainer(model=model_to_use)
             except ValueError:
                 # If the method isn't found, default to LAAT
@@ -238,11 +241,29 @@ class Trainer:
                 model_path=self.experiment_path,
                 dataset=validation_dataset,
                 explainer=explainer_callable,
+                decision_boundary=self.ref_decision_boundary if model_to_use == self.reference_model else self.best_db,
                 target_tokenizer=self.reference_target_tokenizer,
                 cache=True,
                 cache_path=Path(".cache")
             )
-            
+
+            # remove start and end tokens from the attributions
+            explanations_val_df = explanations_val_df.with_columns(
+                pl.col("attributions").map_elements(lambda x: x[1:-1])
+            )
+            # shift evidence token ids by 1 to account for the removed start token
+            explanations_val_df = explanations_val_df.with_columns(
+                evidence_token_ids=pl.col("evidence_token_ids").map_elements(
+                    lambda x: [i - 1 for i in x]
+                )
+            )
+
+            explanations_val_df = explanations_val_df.with_columns(
+                pl.col("attributions").map_elements(
+                    lambda x: (np.array(x) / (sum(x) + 1e-11)).tolist()
+                )
+            )
+
             # Find the explanation decision boundary
             explanation_decision_boundary = find_explanation_decision_boundary(explanations_val_df)
             self.explanation_decision_boundary = explanation_decision_boundary
