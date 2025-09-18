@@ -64,10 +64,12 @@ def load_and_prepare_reference_model(cfg, reference_model_path, text_tokenizer, 
     )
     explanation_decision_boundary, explainer_callable = compute_explanation_decision_boundary_from_reference(
         model=reference_model,
+        model_path=reference_model_path,
         explainability_method=explainability_method,
         dataset=mdace_dataset,
-        device=device,
-        pad_token_id=text_tokenizer.pad_token_id,
+        text_tokenizer=text_tokenizer,
+        target_tokenizer=reference_target_tokenizer,
+        cache_explanations=False,
         decision_boundary=reference_decision_boundary,
     )
 
@@ -202,6 +204,7 @@ def main(cfg: OmegaConf) -> None:
             device
         )
 
+        
         from explainable_medical_coding.utils.analysis import calculate_selected_mask_ids
 
         dataset = dataset.map(

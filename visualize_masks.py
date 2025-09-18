@@ -67,10 +67,12 @@ def load_and_prepare_reference_model(cfg, reference_model_path, text_tokenizer, 
     )
     explanation_decision_boundary, explainer_callable = compute_explanation_decision_boundary_from_reference(
         model=reference_model,
+        model_path=reference_model_path,
         explainability_method=explainability_method,
         dataset=mdace_dataset,
-        device=device,
-        pad_token_id=text_tokenizer.pad_token_id,
+        text_tokenizer=text_tokenizer,
+        target_tokenizer=reference_target_tokenizer,
+        cache_explanations=False,
         decision_boundary=reference_decision_boundary,
     )
 
@@ -158,7 +160,7 @@ def visualize_masks(cfg: OmegaConf) -> None:
         desc="Converting targets to target ids",
     )
     dataset.set_format(
-        type="torch", columns=["input_ids", "length", "attention_mask", "target_ids"]
+        type="torch", columns=["input_ids", "length", "attention_mask", "target_ids", "text", "target"]
     )
 
     # Load reference model and prepare explainer (same as train_plm.py)
@@ -172,6 +174,9 @@ def visualize_masks(cfg: OmegaConf) -> None:
         max_input_length,
         device
     )
+
+    console.print(f"[bold magenta]Reference decision boundary: {reference_decision_boundary:.4f}[/bold magenta]")
+    console.print(f"[bold magenta]Explanation decision boundary: {explanation_decision_boundary:.4f}[/bold magenta]")
 
     # Take a small sample for visualization
     sample_size = 3
@@ -199,7 +204,8 @@ def visualize_masks(cfg: OmegaConf) -> None:
                 x=sample,
                 explanation_decision_boundary=explanation_decision_boundary,
                 device=device,
-                decision_boundary=reference_decision_boundary
+                decision_boundary=reference_decision_boundary,
+                stride=3
             )
             
             selected_mask_ids = result["selected_mask_ids"]

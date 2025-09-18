@@ -259,7 +259,8 @@ def calculate_selected_mask_ids(
         x, 
         explanation_decision_boundary, 
         device="cuda", 
-        decision_boundary=0.5
+        decision_boundary=0.5,
+        stride=0
     ):
     """Calculate selected mask ids for an example by aggregating attribution tokens across all target ids.
     
@@ -272,6 +273,8 @@ def calculate_selected_mask_ids(
         explanation_decision_boundary (float): Decision boundary for converting attributions to token ids
         device (str, optional): Device to run computations on. Defaults to "cuda".
         decision_boundary (float, optional): Decision boundary for prediction. Defaults to 0.5.
+        stride (int, optional): Window size around selected tokens. If stride > 0, expands selection 
+                               by including stride tokens before and after each selected token. Defaults to 0.
         
     Returns:
         dict: Dictionary with 'selected_mask_ids' field containing union of all attribution tokens
@@ -321,10 +324,30 @@ def calculate_selected_mask_ids(
         selected_token_ids = attributions2token_ids(target_attributions, explanation_decision_boundary)
         all_selected_token_ids.update(selected_token_ids)
     
+    # Apply stride window effect if stride > 0
+    if stride > 0:
+        expanded_token_ids = set()
+        sequence_length = attributions.shape[0]
+        
+        for token_id in all_selected_token_ids:
+            # Add the original token
+            expanded_token_ids.add(token_id)
+            
+            # Add tokens within the stride window (before and after)
+            for offset in range(-stride, stride + 1):
+                new_token_id = token_id + offset
+                # Ensure the new token is within valid range
+                if 0 <= new_token_id < sequence_length:
+                    expanded_token_ids.add(new_token_id)
+        
+        all_selected_token_ids = expanded_token_ids
+    
     # Convert set back to sorted list
     selected_mask_ids = sorted(list(all_selected_token_ids))
     
     return {"selected_mask_ids": selected_mask_ids}
+    # x["selected_mask_ids"] = selected_mask_ids
+    # return x
 
 
 @torch.no_grad()
