@@ -614,7 +614,9 @@ def _build_selected_mask_from_batch(
     # 1) Direct mask if available
     if hasattr(batch, "selected_mask_ids") and batch.selected_mask_ids is not None:
         return batch.selected_mask_ids.to(device, dtype=torch.float32)[:, :seq_len]
-
+    else:
+        print("Warning: selected_mask_ids not in batch or is None. Falling back to other strategies.")
+    
     evid = getattr(batch, "evidence_input_ids", None)
 
     # Helper to convert evidence IDs to mask
