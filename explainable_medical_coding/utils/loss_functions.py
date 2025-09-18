@@ -736,7 +736,6 @@ def masked_pooling_aux_loss(
         training_model=model,  # Pass the current model as the training model
         evidence_selection_strategy=evidence_selection_strategy,
         explanation_method=explanation_method,
-        **kwargs
     )
 
     # Forward with masked pooling; also request token-level logits for the aux loss if using token loss
