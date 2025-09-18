@@ -610,12 +610,42 @@ def _build_selected_mask_from_batch(
     evidence_selection_strategy: str = "auto",
     explanation_method: str = "laat",
 ):
-    """Return a (B, L) 0/1 mask if available, else None."""
-    # 1) Direct mask if available
-    if hasattr(batch, "selected_mask_ids") and batch.selected_mask_ids is not None:
-        return batch.selected_mask_ids.to(device, dtype=torch.float32)[:, :seq_len]
-    else:
-        print("Warning: selected_mask_ids not in batch or is None. Falling back to other strategies.")
+
+    if evidence_selection_strategy == "reference_model":
+
+        """Return a (B, L) 0/1 mask if available, else None."""
+        # 1) Direct mask if available
+        if hasattr(batch, "selected_mask_ids") and batch.selected_mask_ids is not None:
+            selected_mask_ids = batch.selected_mask_ids
+            
+            # Handle both tensor and list cases
+            if isinstance(selected_mask_ids, list):
+                # Convert list of lists to tensor mask
+                B = len(selected_mask_ids)
+                mask = torch.zeros((B, seq_len), device=device, dtype=torch.float32)
+                
+                for b, token_indices in enumerate(selected_mask_ids):
+                    for i in token_indices:
+                        if 0 <= i < seq_len:
+                            mask[b, i] = 1.0
+                return mask
+            else:
+                # Already a tensor - convert from indices to binary mask
+                if isinstance(selected_mask_ids, torch.Tensor):
+                    expected_B = batch.input_ids.size(0)
+                    mask = torch.zeros((expected_B, seq_len), device=device, dtype=torch.float32)
+                    
+                    for b in range(expected_B):
+                        for i in selected_mask_ids[b]:
+                            idx = int(i.item())  # Convert tensor element to int
+                            if 0 <= idx < seq_len:
+                                mask[b, idx] = 1.0
+                    return mask
+                else:
+                    print("Warning: selected_mask_ids is neither a list nor a tensor. Falling back to other strategies.")
+                    return None
+        else:
+            print("Warning: selected_mask_ids not in batch or is None. Falling back to other strategies.")
     
     evid = getattr(batch, "evidence_input_ids", None)
 
@@ -749,7 +779,6 @@ def masked_pooling_aux_loss(
         mask_pooling=mask_pooling,
         soft_alpha=soft_alpha,
         fallback_to_full_attention_if_empty=fallback_to_full_attention_if_empty,
-        window_stride=window_stride,
     )
 
     # Primary document-level loss

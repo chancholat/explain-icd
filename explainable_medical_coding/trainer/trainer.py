@@ -405,7 +405,6 @@ class Trainer:
             "scaler": self.gradient_scaler.state_dict(),
             "epoch": self.epoch,
             "db": self.best_db,
-            "explanation_decision_boundary": self.explanation_decision_boundary,
             "num_classes": self.lookups.data_info["num_classes"],
         }
         torch.save(checkpoint, self.experiment_path / file_name)
@@ -423,28 +422,6 @@ class Trainer:
         self.gradient_scaler.load_state_dict(checkpoint["scaler"])
         self.epoch = checkpoint["epoch"]
         self.best_db = checkpoint["db"]
-        
-        # Load explanation_decision_boundary if available
-        if "explanation_decision_boundary" in checkpoint:
-            self.explanation_decision_boundary = checkpoint["explanation_decision_boundary"]
-            pprint(f"Loaded explanation decision boundary: {self.explanation_decision_boundary}")
-        else:
-            # Check if we need to calculate the explanation decision boundary
-            is_masked_pooling = (self._original_loss_function.__name__ == 'masked_pooling_aux_loss' or 
-                                self.config.loss.name == 'masked_pooling_aux_loss')
-            
-            need_threshold = False
-            if is_masked_pooling:
-                strategy = "auto"
-                if hasattr(self.config.loss, 'configs') and hasattr(self.config.loss.configs, 'evidence_selection_strategy'):
-                    strategy = self.config.loss.configs.evidence_selection_strategy
-                
-                if strategy != "evidence_ids":
-                    need_threshold = True
-                    
-            if need_threshold:
-                pprint("Explanation decision boundary not found in checkpoint. Calculating...")
-                self.calculate_explanation_decision_boundary()
         
         pprint(f"Loaded checkpoint from {self.experiment_path / file_name}")
 
