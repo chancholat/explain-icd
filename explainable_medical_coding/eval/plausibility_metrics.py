@@ -4,6 +4,8 @@ from pathlib import Path
 import sklearn.metrics
 from dotenv import find_dotenv, load_dotenv
 
+from explainable_medical_coding.utils.loaders import load_and_prepare_dataset
+
 load_dotenv(find_dotenv())
 
 import numpy as np
@@ -509,3 +511,63 @@ def evaluate_plausibility_and_sparsity(
             results = pl.concat([results, pl.from_dict(results_dict, schema=schema)])
 
     results.write_csv(save_path)
+
+
+
+def compute_explanation_decision_boundary_from_reference(
+    model: torch.nn.Module,
+    model_path: Path,
+    dataset: DatasetDict,
+    text_tokenizer: AutoTokenizer,
+    target_tokenizer: TargetTokenizer,
+    decision_boundary: float,
+    cache_explanations: bool,
+    explainability_method: str,
+) -> float:
+    """Shallow shadow: Only returns explanation decision boundary."""
+
+    dataset = dataset.filter(
+        lambda x: x["note_type"] == "Discharge summary",
+        desc="Filtering all notes that are not discharge summaries",
+    )
+    
+    explainer = get_explainability_method(explainability_method)
+    explainer_callable = explainer(
+        model=model,
+        baseline_token_id=text_tokenizer.mask_token_id,
+        cls_token_id=text_tokenizer.cls_token_id,
+        eos_token_id=text_tokenizer.eos_token_id,
+    )
+
+    datasets = dataset 
+    explanations_val_df = get_explanations(
+        model=model,
+        model_path=model_path,
+        dataset=datasets["validation"],
+        explainer=explainer_callable,
+        target_tokenizer=target_tokenizer,
+        decision_boundary=decision_boundary,
+        cache_path=Path(".cache"),
+        cache=cache_explanations,
+        overwrite_cache=False,
+    )
+    explanations_val_df = explanations_val_df.filter(
+        pl.col("evidence_token_ids").list.len() > 0
+    )
+    explanations_val_df = explanations_val_df.with_columns(
+        pl.col("attributions").map_elements(lambda x: x[1:-1])
+    )
+    explanations_val_df = explanations_val_df.with_columns(
+        evidence_token_ids=pl.col("evidence_token_ids").map_elements(
+            lambda x: [i - 1 for i in x]
+        )
+    )
+    explanations_val_df = explanations_val_df.with_columns(
+        pl.col("attributions").map_elements(
+            lambda x: (np.array(x) / (sum(x) + 1e-11)).tolist()
+        )
+    )
+    explanation_decision_boundary = find_explanation_decision_boundary(
+        explanations_val_df
+    )
+    return explanation_decision_boundary, explainer_callable

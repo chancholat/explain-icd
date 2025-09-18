@@ -599,232 +599,83 @@ def fgsm(
 
     return delta
 
+
 def _build_selected_mask_from_batch(
-    batch, 
-    seq_len: int, 
-    device: torch.device, 
-    explanation_decision_boundary: float = None, 
-    reference_model=None, 
-    training_model=None, 
+    batch,
+    seq_len: int,
+    device: torch.device,
+    explanation_decision_boundary: float = 0.05,
+    reference_model=None,
+    training_model=None,
     evidence_selection_strategy: str = "auto",
     explanation_method: str = "laat",
-    text_tokenizer=None,
 ):
-    """Return a (B, L) 0/1 mask if available, else None.
-    Tries batch.selected_token_mask first; otherwise uses the selected evidence selection strategy.
-    
-    Args:
-        batch: The input batch.
-        seq_len (int): The sequence length.
-        device (torch.device): The device to create the mask on.
-        explanation_decision_boundary (float, optional): The threshold to use for selecting tokens.
-            If None, a default value of 0.05 will be used. Defaults to None.
-        reference_model (torch.nn.Module, optional): A reference model to use for calculating attributions.
-            If None, will try to use model from batch. Defaults to None.
-        training_model (torch.nn.Module, optional): The training model to use for calculating attributions
-            when evidence_selection_strategy is "training_model". Defaults to None.
-        evidence_selection_strategy (str, optional): Strategy for selecting evidence tokens.
-            Options:
-                - "auto": Automatically chooses the best available method (default)
-                - "evidence_ids": Only use evidence_input_ids from the batch
-                - "reference_model": Only use token attributions from the reference model
-                - "training_model": Only use token attributions from the training model
-            Defaults to "auto".
-        explanation_method (str, optional): Method to use for generating token attributions.
-            Options include "laat", "alti", "attention_rollout", "gradient_attention", etc.
-            Defaults to "laat".
-    
-    Returns:
-        torch.Tensor or None: A binary mask of shape (B, L) or None if no mask can be created.
-    """
+    """Return a (B, L) 0/1 mask if available, else None."""
     # 1) Direct mask if available
-    sel = getattr(batch, "selected_token_mask", None)
-    if sel is not None:
-        if isinstance(sel, torch.Tensor):
-            return sel.to(device=device, dtype=torch.float32)[:, :seq_len]
-        return torch.tensor(sel, device=device, dtype=torch.float32)[:, :seq_len]
+    if hasattr(batch, "selected_token_mask") and batch.selected_token_mask is not None:
+        return batch.selected_token_mask.to(device, dtype=torch.float32)[:, :seq_len]
 
-    # 2) Handle different evidence selection strategies
     evid = getattr(batch, "evidence_input_ids", None)
-    
-    # Early return if strategy is evidence_ids and we have evidence IDs
-    if evidence_selection_strategy == "evidence_ids" and evid is not None:
-        B = len(evid)
+
+    # Helper to convert evidence IDs to mask
+    def build_mask_from_evidence(evidence):
+        B = len(evidence)
         mask = torch.zeros((B, seq_len), device=device, dtype=torch.float32)
-        for b in range(B):
-            lists_per_label = evid[b] or []
-            for token_idx_list in lists_per_label or []:
-                if token_idx_list:
-                    for i in token_idx_list:
-                        if 0 <= i < seq_len:
-                            mask[b, i] = 1.0
+        for b, lists_per_label in enumerate(evidence):
+            for token_idx_list in (lists_per_label or []):
+                for i in (token_idx_list or []):
+                    if 0 <= i < seq_len:
+                        mask[b, i] = 1.0
         return mask
-    
-    # Early return if strategy is evidence_ids but we don't have evidence IDs
-    if evidence_selection_strategy == "evidence_ids" and evid is None:
-        return None
-        
-    # If strategy is auto and we have evidence IDs, use them
+
+    # 2) Evidence IDs strategy
+    if evidence_selection_strategy == "evidence_ids":
+        return build_mask_from_evidence(evid) if evid is not None else None
+
+    # Auto strategy prefers evidence IDs
     if evidence_selection_strategy == "auto" and evid is not None:
-        B = len(evid)
-        mask = torch.zeros((B, seq_len), device=device, dtype=torch.float32)
-        for b in range(B):
-            lists_per_label = evid[b] or []
-            for token_idx_list in lists_per_label or []:
-                if token_idx_list:
-                    for i in token_idx_list:
-                        if 0 <= i < seq_len:
-                            mask[b, i] = 1.0
-        return mask
-    
-    # 3) Calculate based on model attributions if strategy allows
+        return build_mask_from_evidence(evid)
+
+    # 3) Attribution-based mask
     if evidence_selection_strategy in ["auto", "reference_model", "training_model"]:
-        import sys
-        sys.path.append("./")
         from explainable_medical_coding.eval.plausibility_metrics import attributions2token_ids
         from explainable_medical_coding.config.factories import get_explainability_method
 
-        # If explanation_decision_boundary is not provided, use a default value
-        if explanation_decision_boundary is None:
-            print("WARNING: Using default explanation_decision_boundary of 0.05")
-            explanation_decision_boundary = 0.05
-            
-        # Determine which model to use for attributions based on strategy
-        model_for_attributions = None
-        
-        if evidence_selection_strategy == "reference_model" and reference_model is not None:
-            model_for_attributions = reference_model
-        elif evidence_selection_strategy == "training_model" and training_model is not None:
-            model_for_attributions = training_model
-        elif evidence_selection_strategy == "auto":
-            # In auto mode, prefer reference model if available, then fallback to training model
-            if reference_model is not None:
-                model_for_attributions = reference_model
-            elif training_model is not None:
-                print("WARNING: Using training_model for attributions")
-                model_for_attributions = training_model
-        
-        if model_for_attributions is None:
+        model = (
+            reference_model
+            if evidence_selection_strategy != "training_model"
+            else training_model
+        )
+        if model is None:
             return None
-        
-        input_ids = batch.input_ids
-        targets = batch.targets
-        attention_masks = batch.attention_masks
+
+        explainer = get_explainability_method(explanation_method)(model=model)
+
+        input_ids, targets, attention_masks = batch.input_ids, batch.targets, batch.attention_masks
         B = input_ids.size(0)
-        
-        try:
-            # Get the explainer function from the factory
-            explainer_function = get_explainability_method(explanation_method)
-            # Create the callable with the model
-            explainer_callable = explainer_function(model=model_for_attributions)
-        except ValueError:
-            # If the method isn't found, default to LAAT
-            print(f"Explanation method '{explanation_method}' not found. Defaulting to LAAT.")
-            explainer_function = get_explainability_method("laat")
-            explainer_callable = explainer_function(model=model_for_attributions)
-        
-        # Calculate attributions for the current batch
         mask = torch.zeros((B, seq_len), device=device, dtype=torch.float32)
-        
-        # Process each example in the batch
+
         for b in range(B):
-            # Use the original target IDs if available, otherwise fall back to one-hot extraction
-            if hasattr(batch, "original_target_ids") and batch.original_target_ids is not None:
-                ground_truth_target_indices = batch.original_target_ids[b]
-            else:
-                # Fall back to extracting from one-hot encoded targets
-                ground_truth_target_indices = torch.where(targets[b] == 1)[0]
-            
-            
-            current_input_ids = input_ids[b:b+1] # Shape (1, seq_len)
-            current_attention_masks = attention_masks[b:b+1] if attention_masks is not None else None            
-            ground_truth_list = ground_truth_target_indices.cpu().tolist() if isinstance(ground_truth_target_indices, torch.Tensor) else ground_truth_target_indices
-            target_indices = torch.tensor(ground_truth_list)
-            
-            if len(target_indices) > 0:
-                # Get attributions using the explainer
-                try:
-                    # Call explainer to get attributions for the specified target indices
-                    # Note: The explainer returns a tensor of shape [sequence_length, len(target_indices)]
-                    # where each column corresponds to one of the target indices in the same order
-                    attributions = explainer_callable(
-                        current_input_ids,
-                        target_indices,
-                        device
-                    )
-                    
-                    # For each target class
-                    for idx, target_idx in enumerate(target_indices):
-                        # Get token attributions for this class
-                        # The idx here corresponds to the position in the attributions tensor
-                        # which matches the position of target_idx in target_indices
-                        if isinstance(attributions, torch.Tensor) and len(attributions.shape) > 1:
-                            # Handle case where attributions are returned per target class
-                            token_attributions = attributions[:seq_len, idx].detach().cpu().numpy() if attributions.device.type != 'cpu' else attributions[:seq_len, idx].detach().numpy()
-                        else:
-                            # Handle case where only one set of attributions is returned
-                            token_attributions = attributions[:seq_len].detach().cpu().numpy() if hasattr(attributions, 'device') and attributions.device.type != 'cpu' else attributions[:seq_len].detach()
-                        # Select tokens with attributions above the threshold
-                        predicted_token_ids = attributions2token_ids(token_attributions, explanation_decision_boundary)
-                        
-                        
-                        # # convert back the token ids to token and print them
-                        # if text_tokenizer is not None:
-                        #     tokens = text_tokenizer.convert_ids_to_tokens(predicted_token_ids)
-                        #     print(f"\nPredicted tokens for target index {target_idx.item() if isinstance(target_idx, torch.Tensor) else target_idx}: {tokens}\n")
-                        #     # Print the evidence ids converted to tokens as well if available
-                        #     if evid is not None and b < len(evid):
-                        #         lists_per_label = evid[b] or []
-                        #         for label_idx, token_idx_list in enumerate(lists_per_label or []):
-                        #             if token_idx_list:
-                        #                 evidence_tokens = text_tokenizer.convert_ids_to_tokens(token_idx_list)
-                        #                 print(f"Evidence tokens for label index {label_idx}: {evidence_tokens}")
+            target_indices = (
+                batch.original_target_ids[b]
+                if hasattr(batch, "original_target_ids") and batch.original_target_ids is not None
+                else torch.where(targets[b] == 1)[0]
+            )
+            if len(target_indices) == 0:
+                continue
 
+            attributions = explainer(input_ids[b:b+1], torch.tensor(target_indices), device)
 
-                        # Set the mask
-                        for i in predicted_token_ids:
-                            if 0 <= i < seq_len:
-                                mask[b, i] = 1.0
-                except Exception as e:
-                    print(f"Error calculating attributions with {explanation_method} method: {e}")
-                    # Fall back to LAAT if the explainer fails
-                    try:
-                        fallback_explainer = get_explainability_method("laat")(model=model_for_attributions)
-                        # Call fallback explainer to get attributions for the specified target indices
-                        # Note: The explainer returns a tensor of shape [sequence_length, len(target_indices)]
-                        # where each column corresponds to one of the target indices in the same order
-                        attributions = fallback_explainer(
-                            current_input_ids,
-                            target_indices,
-                            device
-                        )
-                        
-                        # For each target class
-                        for idx, target_idx in enumerate(target_indices):
-                            # Get token attributions for this class with proper handling
-                            # The idx here corresponds to the position in the attributions tensor
-                            # which matches the position of target_idx in target_indices
-                            if isinstance(attributions, torch.Tensor) and len(attributions.shape) > 1:
-                                token_attributions = attributions[:seq_len, idx].cpu().numpy() if attributions.device.type != 'cpu' else attributions[:seq_len, idx].numpy()
-                            else:
-                                token_attributions = attributions[:seq_len].cpu().numpy() if hasattr(attributions, 'device') and attributions.device.type != 'cpu' else attributions[:seq_len]
-                            
-                            # Select tokens with attributions above the threshold
-                            predicted_token_ids = attributions2token_ids(token_attributions, explanation_decision_boundary)
-                            
-                            # Set the mask
-                            for i in predicted_token_ids:
-                                if 0 <= i < seq_len:
-                                    mask[b, i] = 1.0
-                    except Exception as e2:
-                        print(f"Error with fallback explainer: {e2}")
-                        # If even the fallback fails, return None
-                        return None
-        
+            for idx in range(len(target_indices)):
+                token_attributions = attributions[:seq_len, idx].detach().cpu().numpy()
+                for i in attributions2token_ids(token_attributions, explanation_decision_boundary):
+                    if 0 <= i < seq_len:
+                        mask[b, i] = 1.0
+
         return mask
-    
-    # If we reach here, no valid mask could be created with the given strategy
+
     return None
+
 
 def masked_pooling_aux_loss(
     batch,

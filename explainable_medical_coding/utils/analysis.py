@@ -253,6 +253,80 @@ def create_attention_mask(input_ids: torch.Tensor) -> torch.Tensor:
     return attention_mask
 
 
+def calculate_selected_mask_ids(
+        explainer_callable, 
+        reference_model, 
+        x, 
+        explanation_decision_boundary, 
+        device="cuda", 
+        decision_boundary=0.5
+    ):
+    """Calculate selected mask ids for an example by aggregating attribution tokens across all target ids.
+    
+    This function is designed to be used in a map(lambda x: ) operation.
+    
+    Args:
+        explainer_callable: Explainer callable function
+        reference_model: Reference model for making predictions
+        x: A row/example from the dataset containing input_ids and target_ids
+        explanation_decision_boundary (float): Decision boundary for converting attributions to token ids
+        device (str, optional): Device to run computations on. Defaults to "cuda".
+        decision_boundary (float, optional): Decision boundary for prediction. Defaults to 0.5.
+        
+    Returns:
+        dict: Dictionary with 'selected_mask_ids' field containing union of all attribution tokens
+    """
+    # Get input_ids and ensure it's on the right device and has batch dimension
+    input_ids = x["input_ids"]
+    if isinstance(input_ids, torch.Tensor):
+        if len(input_ids.shape) == 1:
+            input_ids = input_ids.unsqueeze(0)
+        input_ids = input_ids.to(device)
+    else:
+        input_ids = torch.tensor(input_ids).unsqueeze(0).to(device)
+    
+    # Get ground truth target_ids
+    if "target_ids" in x:
+        ground_truth_target_ids = x["target_ids"].tolist() if torch.is_tensor(x["target_ids"]) else x["target_ids"]
+    else:
+        ground_truth_target_ids = []
+    
+    # Make predictions with reference model (no_grad)
+    with torch.no_grad():
+        y_probs = predict(reference_model, input_ids, device).cpu()[0]
+        predicted_target_ids = torch.where(y_probs > decision_boundary)[0].tolist()
+    
+    # Combine ground truth and predicted targets (union)
+    target_ids = torch.tensor(
+        list(set(ground_truth_target_ids) | set(predicted_target_ids))
+    )
+    
+    if len(target_ids) == 0:
+        return {"selected_mask_ids": []}
+    
+    # Calculate attributions using the explainer
+    attributions = explainer_callable(
+        input_ids=input_ids,
+        target_ids=target_ids,
+        device=device,
+    )  # [sequence_length, num_target_classes]
+    
+    # Convert attributions to token ids for each target and aggregate (union)
+    all_selected_token_ids = set()
+    
+    for idx in range(attributions.shape[1]):  # iterate over target classes
+        target_attributions = attributions[:, idx].tolist()
+        # Use the existing attributions2token_ids function from plausibility_metrics
+        from explainable_medical_coding.eval.plausibility_metrics import attributions2token_ids
+        selected_token_ids = attributions2token_ids(target_attributions, explanation_decision_boundary)
+        all_selected_token_ids.update(selected_token_ids)
+    
+    # Convert set back to sorted list
+    selected_mask_ids = sorted(list(all_selected_token_ids))
+    
+    return {"selected_mask_ids": selected_mask_ids}
+
+
 @torch.no_grad()
 def predict(
     model: torch.nn.Module,
