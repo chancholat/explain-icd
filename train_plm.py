@@ -204,7 +204,8 @@ def main(cfg: OmegaConf) -> None:
             max_input_length,
             device
         )
-
+        print(f"Explanation decision boundary: {explanation_decision_boundary}")
+        print(f"Reference decision boundary: {reference_decision_boundary}")
         from explainable_medical_coding.utils.analysis import calculate_selected_mask_ids
         LOGGER.info("Adding selected_mask_ids to dataset using reference model")
         dataset = dataset.map(

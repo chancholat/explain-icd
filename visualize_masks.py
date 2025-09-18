@@ -179,47 +179,57 @@ def visualize_masks(cfg: OmegaConf) -> None:
     console.print(f"[bold magenta]Explanation decision boundary: {explanation_decision_boundary:.4f}[/bold magenta]")
 
     # Take a small sample for visualization
-    sample_size = 3
+    sample_size = 6  # Increased to test batching
     sample_dataset = dataset["train"].select(range(sample_size))
     
-    console.print(f"[bold cyan]Processing {sample_size} samples...[/bold cyan]")
+    console.print(f"[bold cyan]Processing {sample_size} samples in batches...[/bold cyan]")
 
-    # Apply calculate_selected_mask_ids to samples
-    for i, sample in enumerate(sample_dataset):
+    # Test the batched version of calculate_selected_mask_ids
+    console.print("[bold blue]Testing batched processing...[/bold blue]")
+    
+    # Apply calculate_selected_mask_ids in batched mode
+    batch_size = 3  # Process 3 samples at a time
+    batched_results = sample_dataset.map(
+        lambda x: calculate_selected_mask_ids(
+            explainer_callable=explainer_callable,
+            reference_model=reference_model,
+            x=x,
+            explanation_decision_boundary=explanation_decision_boundary,
+            device=device,
+            decision_boundary=reference_decision_boundary,
+            stride=3
+        ),
+        desc="Testing batched mask calculation",
+        batched=True,
+        batch_size=batch_size,
+    )
+
+    console.print(f"[bold green]Batched processing completed successfully![/bold green]")
+    console.print(f"Processed {len(batched_results)} samples")
+
+    # Visualize the results
+    for i, sample in enumerate(batched_results):
         console.print(f"\n[bold yellow]Sample {i+1}:[/bold yellow]")
         
         # Get original text and target codes
         original_text = sample[TEXT_COLUMN]
         target_codes = sample[TARGET_COLUMN]
         input_ids = sample["input_ids"].tolist()
+        selected_mask_ids = sample["selected_mask_ids"]
         
         console.print(f"Target codes: {target_codes}")
         console.print(f"Text length: {len(original_text)} chars, Token length: {len(input_ids)} tokens")
+        console.print(f"Selected mask positions: {selected_mask_ids}")
+        console.print(f"Number of highlighted tokens: {len(selected_mask_ids)}/{len(input_ids)} ({len(selected_mask_ids)/len(input_ids)*100:.1f}%)")
         
         try:
-            # Calculate selected mask ids (same as train_plm.py)
-            result = calculate_selected_mask_ids(
-                explainer_callable=explainer_callable,
-                reference_model=reference_model,
-                x=sample,
-                explanation_decision_boundary=explanation_decision_boundary,
-                device=device,
-                decision_boundary=reference_decision_boundary,
-                stride=3
-            )
-            
-            selected_mask_ids = result["selected_mask_ids"]
-            
-            console.print(f"Selected mask positions: {selected_mask_ids}")
-            console.print(f"Number of highlighted tokens: {len(selected_mask_ids)}/{len(input_ids)} ({len(selected_mask_ids)/len(input_ids)*100:.1f}%)")
-            
             # Create highlighted visualization
             highlighted_text = highlight_tokens_in_text(
                 original_text, input_ids, text_tokenizer, selected_mask_ids
             )
             
             # Display results
-            console.print(Panel(highlighted_text, title=f"Sample {i+1} - Highlighted Important Tokens"))
+            console.print(Panel(highlighted_text, title=f"Sample {i+1} - Highlighted Important Tokens (Batched)"))
             
             # Show some highlighted tokens
             highlighted_tokens = []
@@ -232,9 +242,45 @@ def visualize_masks(cfg: OmegaConf) -> None:
                 console.print(f"Sample highlighted tokens: {', '.join(highlighted_tokens)}")
             
         except Exception as e:
-            console.print(f"[bold red]Error processing sample {i+1}: {e}[/bold red]")
+            console.print(f"[bold red]Error visualizing sample {i+1}: {e}[/bold red]")
             import traceback
             traceback.print_exc()
+
+    # Test single example processing for comparison
+    console.print(f"\n[bold blue]Testing single example processing for comparison...[/bold blue]")
+    
+    single_sample = sample_dataset[0]  # Get first sample
+    console.print(f"\n[bold yellow]Single Sample Test:[/bold yellow]")
+    
+    try:
+        # Calculate selected mask ids for single example
+        single_result = calculate_selected_mask_ids(
+            explainer_callable=explainer_callable,
+            reference_model=reference_model,
+            x=single_sample,
+            explanation_decision_boundary=explanation_decision_boundary,
+            device=device,
+            decision_boundary=reference_decision_boundary,
+            stride=3
+        )
+        
+        single_selected_mask_ids = single_result["selected_mask_ids"]
+        batched_selected_mask_ids = batched_results[0]["selected_mask_ids"]
+        
+        console.print(f"Single processing result: {single_selected_mask_ids}")
+        console.print(f"Batched processing result: {batched_selected_mask_ids}")
+        
+        # Check if results match
+        if single_selected_mask_ids == batched_selected_mask_ids:
+            console.print("[bold green]✅ Single and batched processing results match![/bold green]")
+        else:
+            console.print("[bold red]❌ Single and batched processing results differ![/bold red]")
+            console.print(f"Difference: {set(single_selected_mask_ids) ^ set(batched_selected_mask_ids)}")
+        
+    except Exception as e:
+        console.print(f"[bold red]Error in single example test: {e}[/bold red]")
+        import traceback
+        traceback.print_exc()
 
     console.print("\n[bold green]Visualization completed![/bold green]")
 

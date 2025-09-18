@@ -269,7 +269,7 @@ def calculate_selected_mask_ids(
     Args:
         explainer_callable: Explainer callable function
         reference_model: Reference model for making predictions
-        x: A row/example from the dataset containing input_ids and target_ids
+        x: A row/example from the dataset containing input_ids and target_ids (can be batched or single)
         explanation_decision_boundary (float): Decision boundary for converting attributions to token ids
         device (str, optional): Device to run computations on. Defaults to "cuda".
         decision_boundary (float, optional): Decision boundary for prediction. Defaults to 0.5.
@@ -279,6 +279,59 @@ def calculate_selected_mask_ids(
     Returns:
         dict: Dictionary with 'selected_mask_ids' field containing union of all attribution tokens
     """
+    # Check if this is batched data (lists) or single example (tensors/single values)
+    input_ids = x["input_ids"]
+    
+    # Handle batched input
+    if isinstance(input_ids, list) and len(input_ids) > 0 and isinstance(input_ids[0], (list, torch.Tensor)):
+        # Batched data - process each example
+        batch_size = len(input_ids)
+        all_selected_mask_ids = []
+        
+        for i in range(batch_size):
+            # Create single example dict
+            single_x = {
+                "input_ids": input_ids[i],
+                "target_ids": x["target_ids"][i] if "target_ids" in x else []
+            }
+            
+            # Process single example
+            result = calculate_selected_mask_ids_single(
+                explainer_callable=explainer_callable,
+                reference_model=reference_model,
+                x=single_x,
+                explanation_decision_boundary=explanation_decision_boundary,
+                device=device,
+                decision_boundary=decision_boundary,
+                stride=stride
+            )
+            all_selected_mask_ids.append(result["selected_mask_ids"])
+        
+        return {"selected_mask_ids": all_selected_mask_ids}
+    
+    else:
+        # Single example - call the single processing function
+        return calculate_selected_mask_ids_single(
+            explainer_callable=explainer_callable,
+            reference_model=reference_model,
+            x=x,
+            explanation_decision_boundary=explanation_decision_boundary,
+            device=device,
+            decision_boundary=decision_boundary,
+            stride=stride
+        )
+
+
+def calculate_selected_mask_ids_single(
+        explainer_callable, 
+        reference_model, 
+        x, 
+        explanation_decision_boundary, 
+        device="cuda", 
+        decision_boundary=0.5,
+        stride=0
+    ):
+    """Calculate selected mask ids for a single example."""
     # Get input_ids and ensure it's on the right device and has batch dimension
     input_ids = x["input_ids"]
     if isinstance(input_ids, torch.Tensor):
@@ -286,7 +339,8 @@ def calculate_selected_mask_ids(
             input_ids = input_ids.unsqueeze(0)
         input_ids = input_ids.to(device)
     else:
-        input_ids = torch.tensor(input_ids).unsqueeze(0).to(device)
+        # Convert list to tensor
+        input_ids = torch.tensor(input_ids, dtype=torch.long).unsqueeze(0).to(device)
     
     # Get ground truth target_ids
     if "target_ids" in x:
@@ -346,8 +400,6 @@ def calculate_selected_mask_ids(
     selected_mask_ids = sorted(list(all_selected_token_ids))
     
     return {"selected_mask_ids": selected_mask_ids}
-    # x["selected_mask_ids"] = selected_mask_ids
-    # return x
 
 
 @torch.no_grad()
