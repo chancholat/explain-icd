@@ -80,49 +80,20 @@ class Trainer:
             # Add use_token_loss from config if not explicitly provided
             if 'use_token_loss' not in kwargs and hasattr(self.config.loss, 'configs') and hasattr(self.config.loss.configs, 'use_token_loss'):
                 kwargs['use_token_loss'] = self.config.loss.configs.use_token_loss
-            
-            # Add explanation_decision_boundary if not explicitly provided
-            if 'explanation_decision_boundary' not in kwargs and self.explanation_decision_boundary is not None:
-                kwargs['explanation_decision_boundary'] = self.explanation_decision_boundary
-                
-            # Add reference_model if available
-            if self.reference_model is not None:
-                kwargs['reference_model'] = self.reference_model
                 
             # Add evidence_selection_strategy from config
-            if hasattr(self.config.loss, 'configs') and hasattr(self.config.loss.configs, 'evidence_selection_strategy'):
+            if hasattr(self.config.loss.configs, 'evidence_selection_strategy'):
                 kwargs['evidence_selection_strategy'] = self.config.loss.configs.evidence_selection_strategy
-                
-                # Check configuration coherence
-                strategy = self.config.loss.configs.evidence_selection_strategy
-                if strategy == "reference_model" and self.reference_model is None:
-                    pprint("WARNING: evidence_selection_strategy is set to 'reference_model' but no reference model is provided.")
-                    pprint("Falling back to 'auto' strategy.")
-                    kwargs['evidence_selection_strategy'] = "auto"
-                elif strategy == "training_model":
-                    # Ensure we're using the training model - this is already handled by default
-                    pprint("Using training model for token attributions as specified by evidence_selection_strategy")
             
             # Add explanation_method from config
-            if hasattr(self.config.loss, 'configs') and hasattr(self.config.loss.configs, 'explanation_method'):
+            if hasattr(self.config.loss.configs, 'explanation_method'):
                 kwargs['explanation_method'] = self.config.loss.configs.explanation_method
 
-
-            # Add text_tokenizer if available in lookups
-            text_tokenizer = AutoTokenizer.from_pretrained(
-                # cfg.model.configs.model_path,
-                self.config.model.configs.model_path,
-            )   
-
-            kwargs['text_tokenizer'] = text_tokenizer
-                
-            # NEW: Pass all remaining configs from self.config.loss.configs as kwargs
-            if hasattr(self.config.loss, 'configs'):
-                # Convert OmegaConf to dict and update kwargs with all config params
-                for key, value in OmegaConf.to_container(self.config.loss.configs).items():
-                    # Don't override already set parameters
-                    if key not in kwargs:
-                        kwargs[key] = value
+            # Convert OmegaConf to dict and update kwargs with all config params
+            for key, value in OmegaConf.to_container(self.config.loss.configs).items():
+                # Don't override already set parameters
+                if key not in kwargs:
+                    kwargs[key] = value
         
         return self._original_loss_function(batch, model=model, **kwargs)
       
@@ -424,9 +395,6 @@ class Trainer:
         self.model.to(device)
         for split_name in self.metric_collections.keys():
             self.metric_collections[split_name].to(device)
-
-        if self.reference_model is not None:
-            self.reference_model.to(device)
         self.device = device
         return self
 

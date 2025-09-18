@@ -33,6 +33,7 @@ class Batch:
     original_target_ids: Optional[list[torch.Tensor]] = None
     
     evidence_input_ids: Optional[Sequence[Sequence[Sequence[int]]]] = None
+    selected_mask_ids: Optional[torch.Tensor] = None  # (B, L) 0/1 mask for selected tokens
 
     def to(self, device: Any) -> "Batch":
         """Move the batch to a device.

@@ -612,8 +612,8 @@ def _build_selected_mask_from_batch(
 ):
     """Return a (B, L) 0/1 mask if available, else None."""
     # 1) Direct mask if available
-    if hasattr(batch, "selected_token_mask") and batch.selected_token_mask is not None:
-        return batch.selected_token_mask.to(device, dtype=torch.float32)[:, :seq_len]
+    if hasattr(batch, "selected_mask_ids") and batch.selected_mask_ids is not None:
+        return batch.selected_mask_ids.to(device, dtype=torch.float32)[:, :seq_len]
 
     evid = getattr(batch, "evidence_input_ids", None)
 

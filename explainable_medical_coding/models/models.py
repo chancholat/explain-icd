@@ -436,7 +436,6 @@ class PLMICD(nn.Module):
             mask_pooling: bool = True,                      # NEW: control whether to mask pooling
             soft_alpha: float = 0.0,                        # NEW: soft weight for unselected tokens in pooling (0.0 = hard mask)
             fallback_to_full_attention_if_empty: bool = True,  # NEW: if a sample selects nothing, keep original attention for that sample
-            window_stride: int = 0,                         # NEW: how many tokens to expand on each side of a selected token
         ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
             """
             Encoder once; optionally block gradients for unselected tokens; optionally mask pooling.
@@ -457,42 +456,15 @@ class PLMICD(nn.Module):
                 sel = sel[:, : token_reps.size(1)]  # safety clip
                 B, L = sel.shape
 
-                # Apply window effect - expand selections by window_stride on both sides
-                if window_stride > 0:
-                    # Create an expanded mask using a more efficient approach
-                    expanded_sel = sel.clone()
-                    
-                    # We'll use a 1D convolution as an efficient way to implement the window effect
-                    # Create a convolution kernel of all ones with size 2*window_stride+1
-                    kernel = torch.ones(1, 1, 2*window_stride+1, device=sel.device)
-                    
-                    # Convert the selection mask to a format suitable for 1D convolution
-                    sel_for_conv = sel.unsqueeze(1).float()  # [B, 1, L]
-                    
-                    # Perform the convolution with appropriate padding
-                    conv_result = torch.nn.functional.conv1d(
-                        sel_for_conv, 
-                        kernel, 
-                        padding=window_stride
-                    )  # [B, 1, L]
-                    
-                    # If any value in the window is 1, we consider it selected
-                    window_sel = (conv_result > 0).squeeze(1).to(sel.dtype)
-                else:
-                    window_sel = sel
-
-                # Row mask: which samples have at least one selected token
-                has_any = (window_sel.sum(dim=1) > 0).to(token_reps.dtype).view(B, 1, 1)  # (B,1,1)
-
+                window_sel = sel  # (B, L)
                 # Create padded version of window_sel if needed
                 if pad_len > 0:
                     pad_window_sel = torch.nn.functional.pad(window_sel, (0, pad_len), value=0)
                 else:
                     pad_window_sel = window_sel
 
-                # Optional stop-gradient on unselected tokens (only for rows that have selections)
+                # Optional stop-gradient on unselected tokens (for all rows regardless of selections)
                 if stop_gradient_unselected:
-                    token_reps = token_reps * has_any + token_reps * (1.0 - has_any)  # no-op to ensure shape
                     token_reps = token_reps * pad_window_sel.unsqueeze(-1) + token_reps.detach() * (1.0 - pad_window_sel.unsqueeze(-1))
 
                 if mask_pooling:

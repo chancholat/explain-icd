@@ -115,6 +115,11 @@ class BaseDataset(torch.utils.data.Dataset):
         else:
             evidence_input_ids = None
 
+        if "selected_mask_ids" in batch.column_names:
+            selected_mask_ids = batch["selected_mask_ids"]
+        else:
+            selected_mask_ids = None
+
         if "note_id" in batch.column_names:
             note_ids = batch["note_id"]
         else:
@@ -137,4 +142,5 @@ class BaseDataset(torch.utils.data.Dataset):
             evidence_input_ids=evidence_input_ids,
             teacher_logits=teacher_logits,
             original_target_ids=original_target_ids,  # Add the original target IDs
+            selected_mask_ids=selected_mask_ids,
         )
