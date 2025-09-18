@@ -194,7 +194,7 @@ def main(cfg: OmegaConf) -> None:
         model.train()
 
     if cfg.loss.name == 'masked_pooling_aux_loss':
-        
+        LOGGER.info("Loading reference model for masked_pooling_aux_loss")
         reference_model, reference_decision_boundary, explanation_decision_boundary, explainer_callable = load_and_prepare_reference_model(
             cfg,
             reference_model_path,
@@ -206,7 +206,7 @@ def main(cfg: OmegaConf) -> None:
         )
 
         from explainable_medical_coding.utils.analysis import calculate_selected_mask_ids
-
+        LOGGER.info("Adding selected_mask_ids to dataset using reference model")
         dataset = dataset.map(
             lambda x:  calculate_selected_mask_ids(
                 explainer_callable=explainer_callable,
