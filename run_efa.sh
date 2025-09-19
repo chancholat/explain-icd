@@ -8,6 +8,8 @@
 #SBATCH --mail-type=END,TIME_LIMIT
 #SBATCH --mail-user=thin.nguyen@deakin.edu.au
 
+set -euo pipefail
+
 # ---------------- Env ----------------
 module load Anaconda3
 source activate
@@ -25,9 +27,10 @@ GPU=0
 LRS=(5e-5 1e-5)
 METHODS=(laat grad_attention)
 REFS=("models/supervised/ym0o7co8" "models/supervised_attention_full_target")
+WINDOW_STRIDES=(6 10 15 20)
 
 # Fixed singletons
-SOFT_ALPHA=0.1
+SOFT_ALPHA=0.3
 LAMBDA_AUX=0
 
 # ---------------- Helpers ----------------
@@ -37,7 +40,7 @@ is_float()   { [[ "$1" =~ ^([0-9]*\.)?[0-9]+([eE][-+]?[0-9]+)?$ ]]; }
 resolve_lr() {
   local arg="$1"
   if is_integer "$arg"; then
-    (( arg < 0 || arg >= ${#LRS[@]} )) && { echo "LR index out of range"; return 1; }
+    (( arg < 0 || arg >= ${#LRS[@]} )) && { echo "LR index out of range" ; return 1; }
     echo "${LRS[$arg]}"
   elif is_float "$arg"; then
     echo "$arg"
@@ -80,7 +83,7 @@ Usage (inject-only):
 
 Examples:
   sbatch $0 0 1 0
-  sbatch $0 3e-5 laat   
+  sbatch $0 3e-5 laat 0
 EOF
 }
 
@@ -90,9 +93,12 @@ if [[ $# -ne 3 ]]; then
   exit 1
 fi
 
-LR="$(resolve_lr "$1")"         || { echo "$LR"; exit 2; }
-METHOD="$(resolve_method "$2")" || { echo "$METHOD"; exit 3; }
-REF="$(resolve_ref "$3")"       || { echo "$REF"; exit 4; }
+if ! _out="$(resolve_lr "$1")"; then echo "$_out"; exit 2; fi
+LR="$_out"
+if ! _out="$(resolve_method "$2")"; then echo "$_out"; exit 3; fi
+METHOD="$_out"
+if ! _out="$(resolve_ref "$3")"; then echo "$_out"; exit 4; fi
+REF="$_out"
 
 mkdir -p logs
 JID="${SLURM_JOB_ID:-local$$}"
@@ -103,44 +109,49 @@ echo "Injected: LR=${LR}, METHOD=${METHOD}, REF=${REF}"
 echo "Fixed: EXPERIMENT=${EXPERIMENT}, BATCH=${BATCH}, GPU=${GPU}"
 echo "-----------------------------------------------"
 
-REF_BASENAME="$(basename "$REF")"
-TAG="lr${LR}_lam${LAMBDA_AUX}_${METHOD}_${REF_BASENAME}"
-LOG="logs/plm_${TAG}_job${JID}_${STAMP}.out"
-ERR="logs/plm_${TAG}_job${JID}_${STAMP}.err"
+for WINDOW_STRIDE in "${WINDOW_STRIDES[@]}"; do
+  REF_BASENAME="$(basename "$REF")"
+  TAG="lr${LR}_sa${SOFT_ALPHA}_${METHOD}_${REF_BASENAME}_ws${WINDOW_STRIDE}"
+  LOG="logs/plm_${TAG}_job${JID}_${STAMP}.out"
+  ERR="logs/plm_${TAG}_job${JID}_${STAMP}.err"
 
-CMD=( python train_plm.py
-  "experiment=${EXPERIMENT}"
-  "dataloader.max_batch_size=${MAX_BATCH}"
-  "dataloader.batch_size=${BATCH}"
-  "gpu=${GPU}"
-  "optimizer.configs.lr=${LR}"
-  "loss.configs.soft_alpha=${SOFT_ALPHA}"
-  "loss.configs.lambda_aux=${LAMBDA_AUX}"
-  "loss.configs.use_token_loss=False"
-  "loss.configs.evidence_selection_strategy=reference_model"
-  "loss.configs.reference_model_path=${REF}"
-  "loss.configs.fallback_to_full_attention_if_empty=False"
-  "loss.configs.mask_pooling=False"
-  "loss.configs.explanation_method=${METHOD}"
-)
+  CMD=(
+    srun -N1 -n1 python train_plm.py
+    "experiment=${EXPERIMENT}"
+    "dataloader.max_batch_size=${MAX_BATCH}"
+    "dataloader.batch_size=${BATCH}"
+    "gpu=${GPU}"
+    "optimizer.configs.lr=${LR}"
+    "loss.configs.soft_alpha=${SOFT_ALPHA}"
+    "loss.configs.lambda_aux=${LAMBDA_AUX}"
+    "loss.configs.use_token_loss=False"
+    "loss.configs.evidence_selection_strategy=reference_model"
+    "loss.configs.reference_model_path=${REF}"
+    "loss.configs.fallback_to_full_attention_if_empty=False"
+    "loss.configs.mask_pooling=True"
+    "loss.configs.explanation_method=${METHOD}"
+    "loss.configs.window_stride=${WINDOW_STRIDE}"
+  )
 
-{
-  echo "JOB=${JID}"
-  echo "HOST=$(hostname)"
-  echo "LR=${LR}"
-  echo "explanation_method=${METHOD}"
-  echo "reference_model_path=${REF}"
-  echo "[CMD] ${CMD[*]}"
-  echo "-------------------------------------------"
-} >"$LOG"
+  {
+    echo "JOB=${JID}"
+    echo "HOST=$(hostname)"
+    echo "LR=${LR}"
+    echo "explanation_method=${METHOD}"
+    echo "reference_model_path=${REF}"
+    echo "[CMD] ${CMD[*]}"
+    echo "-------------------------------------------"
+  } >"$LOG"
 
-"${CMD[@]}" >>"$LOG" 2>"$ERR"
-status=$?
+  # run and capture exit code properly
+  "${CMD[@]}" >>"$LOG" 2>"$ERR"
+  status=$?
 
-if [[ $status -eq 0 ]]; then
-  echo "✅ Done: ${TAG}" | tee -a "$LOG"
-else
-  echo "❌ Failed: ${TAG} (see $ERR)" | tee -a "$LOG"
-fi
+  if [[ $status -eq 0 ]]; then
+    echo "✅ Done: ${TAG}" | tee -a "$LOG"
+  else
+    echo "❌ Failed: ${TAG} (see $ERR)" | tee -a "$LOG"
+  fi
+done
 
-exit $status
+echo "=== ALL DONE ==="
