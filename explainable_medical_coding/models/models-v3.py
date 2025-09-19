@@ -443,47 +443,47 @@ class PLMICD(nn.Module):
             - If mask_pooling=True and 0<soft_alpha<1, unselected tokens get weight=soft_alpha at pooling.
             - If mask_pooling=False, pooling uses the original attention mask (full context),
               but you can still stop gradients on unselected tokens.
+            - If window_stride>0, selections are expanded to include window_stride tokens on each side.
+              This expansion applies to both gradient preservation and pooling weights.
             """
             token_reps = self.encoder(input_ids, attention_masks)  # (B, L, H)
-            # print("token reps:", token_reps.shape)
             eff_attention = attention_masks  # (B, L)
             if selected_token_mask is not None:
                 sel = selected_token_mask.to(token_reps.dtype)
                 pad_len = token_reps.size(1) - sel.size(1)
                 if pad_len > 0:
                     pad_sel = torch.nn.functional.pad(sel, (0, pad_len), value=0)
-                # print("sel:", sel.shape)
-                # print("sel unsqueeeze(-1):", sel.unsqueeze(-1).shape)
                 sel = sel[:, : token_reps.size(1)]  # safety clip
                 B, L = sel.shape
 
-                # Row mask: which samples have at least one selected token
-                has_any = (sel.sum(dim=1) > 0).to(token_reps.dtype).view(B, 1, 1)  # (B,1,1)
-                # print("has any:", has_any.shape)
+                window_sel = sel  # (B, L)
+                # Create padded version of window_sel if needed
+                if pad_len > 0:
+                    pad_window_sel = torch.nn.functional.pad(window_sel, (0, pad_len), value=0)
+                else:
+                    pad_window_sel = window_sel
 
-
-                # Optional stop-gradient on unselected tokens (only for rows that have selections)
+                # Optional stop-gradient on unselected tokens (for all rows regardless of selections)
                 if stop_gradient_unselected:
-                    token_reps = token_reps * has_any + token_reps * (1.0 - has_any)  # no-op to ensure shape
-                    token_reps = token_reps * pad_sel.unsqueeze(-1) + token_reps.detach() * (1.0 - pad_sel.unsqueeze(-1))
+                    token_reps = token_reps * pad_window_sel.unsqueeze(-1) + token_reps.detach() * (1.0 - pad_window_sel.unsqueeze(-1))
 
                 if mask_pooling:
                     if soft_alpha <= 0.0:
                         # Hard mask: selected=1, unselected=0
-                        ea = (attention_masks.to(sel.dtype) * sel)
+                        ea = (attention_masks.to(window_sel.dtype) * window_sel)
                         if fallback_to_full_attention_if_empty:
                             # For rows with no selections, keep the original attention
-                            no_sel_rows = (sel.sum(dim=1) == 0)
+                            no_sel_rows = (window_sel.sum(dim=1) == 0)
                             if no_sel_rows.any():
-                                ea[no_sel_rows] = attention_masks[no_sel_rows]
+                                ea[no_sel_rows] = attention_masks[no_sel_rows].to(window_sel.dtype)
                         eff_attention = ea.to(attention_masks.dtype)
                     else:
                         # Soft mask: selected=1.0, unselected=alpha
-                        soft_w = soft_alpha + (1.0 - soft_alpha) * sel  # (B, L)
+                        soft_w = soft_alpha + (1.0 - soft_alpha) * window_sel  # (B, L)
                         if fallback_to_full_attention_if_empty:
-                            no_sel_rows = (sel.sum(dim=1) == 0)
+                            no_sel_rows = (window_sel.sum(dim=1) == 0)
                             if no_sel_rows.any():
-                                soft_w[no_sel_rows] = 1.0  # keep original attention for those rows
+                                soft_w[no_sel_rows] = soft_alpha   # keep original attention for those rows
                         ea = (attention_masks.to(soft_w.dtype) * soft_w)
                         eff_attention = ea.to(attention_masks.dtype)
                 else:

@@ -599,40 +599,130 @@ def fgsm(
 
     return delta
 
-def _build_selected_mask_from_batch(batch, seq_len: int, device: torch.device):
-    """Return a (B, L) 0/1 mask if available, else None.
-    Tries batch.selected_token_mask first; otherwise unions indices in batch.evidence_input_ids.
-    """
-    # 1) Direct mask
-    sel = getattr(batch, "selected_token_mask_test", None)
-    if sel is not None:
-        if isinstance(sel, torch.Tensor):
-            return sel.to(device=device, dtype=torch.float32)[:, :seq_len]
-        return torch.tensor(sel, device=device, dtype=torch.float32)[:, :seq_len]
 
-    # 2) Build from evidence_input_ids (list per sample -> list per label -> token idx list)
-    evid = getattr(batch, "evidence_input_ids", None)
-    if evid is not None:
-        B = len(evid)
-        mask = torch.zeros((B, seq_len), device=device, dtype=torch.float32)
-        for b in range(B):
-            lists_per_label = evid[b] or []
-            for token_idx_list in lists_per_label or []:
-                if token_idx_list:
-                    for i in token_idx_list:
+def _build_selected_mask_from_batch(
+    batch,
+    seq_len: int,
+    device: torch.device,
+    explanation_decision_boundary: float = 0.05,
+    reference_model=None,
+    training_model=None,
+    evidence_selection_strategy: str = "auto",
+    explanation_method: str = "laat",
+):
+
+    if evidence_selection_strategy == "reference_model":
+
+        """Return a (B, L) 0/1 mask if available, else None."""
+        # 1) Direct mask if available
+        if hasattr(batch, "selected_mask_ids") and batch.selected_mask_ids is not None:
+            selected_mask_ids = batch.selected_mask_ids
+            
+            # Handle both tensor and list cases
+            if isinstance(selected_mask_ids, list):
+                # Convert list of lists to tensor mask
+                B = len(selected_mask_ids)
+                mask = torch.zeros((B, seq_len), device=device, dtype=torch.float32)
+                
+                for b, token_indices in enumerate(selected_mask_ids):
+                    for i in token_indices:
                         if 0 <= i < seq_len:
                             mask[b, i] = 1.0
+                return mask
+            else:
+                # Already a tensor - convert from indices to binary mask
+                if isinstance(selected_mask_ids, torch.Tensor):
+                    expected_B = batch.input_ids.size(0)
+                    mask = torch.zeros((expected_B, seq_len), device=device, dtype=torch.float32)
+                    
+                    for b in range(expected_B):
+                        for i in selected_mask_ids[b]:
+                            idx = int(i.item())  # Convert tensor element to int
+                            if 0 <= idx < seq_len:
+                                mask[b, idx] = 1.0
+                    return mask
+                else:
+                    print("Warning: selected_mask_ids is neither a list nor a tensor. Falling back to other strategies.")
+                    return None
+        else:
+            print("Warning: selected_mask_ids not in batch or is None. Falling back to other strategies.")
+    
+    evid = getattr(batch, "evidence_input_ids", None)
+
+    # Helper to convert evidence IDs to mask
+    def build_mask_from_evidence(evidence):
+        B = len(evidence)
+        mask = torch.zeros((B, seq_len), device=device, dtype=torch.float32)
+        for b, lists_per_label in enumerate(evidence):
+            for token_idx_list in (lists_per_label or []):
+                for i in (token_idx_list or []):
+                    if 0 <= i < seq_len:
+                        mask[b, i] = 1.0
         return mask
+
+    # 2) Evidence IDs strategy
+    if evidence_selection_strategy == "evidence_ids":
+        return build_mask_from_evidence(evid) if evid is not None else None
+
+    # Auto strategy prefers evidence IDs
+    if evidence_selection_strategy == "auto" and evid is not None:
+        return build_mask_from_evidence(evid)
+
+    # 3) Attribution-based mask
+    if evidence_selection_strategy in ["auto", "reference_model", "training_model"]:
+        from explainable_medical_coding.eval.plausibility_metrics import attributions2token_ids
+        from explainable_medical_coding.config.factories import get_explainability_method
+
+        model = (
+            reference_model
+            if evidence_selection_strategy != "training_model"
+            else training_model
+        )
+        if model is None:
+            return None
+
+        explainer = get_explainability_method(explanation_method)(model=model)
+
+        input_ids, targets, attention_masks = batch.input_ids, batch.targets, batch.attention_masks
+        B = input_ids.size(0)
+        mask = torch.zeros((B, seq_len), device=device, dtype=torch.float32)
+
+        for b in range(B):
+            target_indices = (
+                batch.original_target_ids[b]
+                if hasattr(batch, "original_target_ids") and batch.original_target_ids is not None
+                else torch.where(targets[b] == 1)[0]
+            )
+            if len(target_indices) == 0:
+                continue
+
+            attributions = explainer(input_ids[b:b+1], torch.tensor(target_indices), device)
+
+            for idx in range(len(target_indices)):
+                token_attributions = attributions[:seq_len, idx].detach().cpu().numpy()
+                for i in attributions2token_ids(token_attributions, explanation_decision_boundary):
+                    if 0 <= i < seq_len:
+                        mask[b, i] = 1.0
+
+        return mask
+
     return None
+
 
 def masked_pooling_aux_loss(
     batch,
     model,
-    lambda_aux: float = 0.3,
+    lambda_aux: float = 0.0,
     stop_gradient_unselected: bool = True,
     mask_pooling: bool = True,                       # NEW
     soft_alpha: float = 0.0,                         # NEW
     fallback_to_full_attention_if_empty: bool = True,# NEW
+    explanation_decision_boundary: float = None,     # NEW
+    use_token_loss: bool = True,                     # NEW
+    reference_model = None,                          # NEW
+    evidence_selection_strategy: str = "auto",       # NEW
+    explanation_method: str = "laat",                # NEW
+    window_stride: int = 0,                          # NEW
     **kwargs,
 ):
     """Document-level BCE + token-level auxiliary BCE on selected tokens.
@@ -641,21 +731,50 @@ def masked_pooling_aux_loss(
     - Optional stop-grad: block gradients through unselected token reps.
     - Auxiliary: token head predicts labels at each token; BCE over selected positions only.
     - If no selected tokens for a sample and fallback=True, we keep original attention for that sample.
+    - If use_token_loss=False, only document-level BCE is used (no token-level auxiliary BCE).
+    - If reference_model is provided, it will be used to calculate token attributions.
+    - evidence_selection_strategy controls how evidence tokens are selected:
+      - "auto": Automatically choose the best available method (default)
+      - "evidence_ids": Only use evidence_input_ids from the batch
+      - "reference_model": Only use token attributions from the reference model
+      - "training_model": Only use token attributions from the training model
+    - explanation_method controls which method to use for token attributions:
+      - "laat": Label-wise Attention (default)
+      - "alti": Attention Last Token Importance
+      - "attention_rollout": Attention Rollout
+      - "gradient_attention": Gradient x Attention
+      - "deeplift": DeepLift
+      - "integrated_gradients": Integrated Gradients
+      - "gradient_x_input": Gradient x Input
+      - "occlusion": Occlusion
+      - "invert_label_att": Inverted Label Attention
 
     Returns: (y_probs, targets, total_loss)
     """
+
+    # check the arguments
+    # print(f"masked_pooling_aux_loss called with lambda_aux={lambda_aux}, stop_gradient_unselected={stop_gradient_unselected}, mask_pooling={mask_pooling}, soft_alpha={soft_alpha}, fallback_to_full_attention_if_empty={fallback_to_full_attention_if_empty}, explanation_decision_boundary={explanation_decision_boundary}, use_token_loss={use_token_loss}, evidence_selection_strategy={evidence_selection_strategy}, explanation_method={explanation_method}, window_stride={window_stride}")
     input_ids, targets, attention_masks = batch.input_ids, batch.targets, batch.attention_masks
 
     seq_len = input_ids.size(1)
-    sel_mask = _build_selected_mask_from_batch(batch, seq_len, input_ids.device)
+    sel_mask = _build_selected_mask_from_batch(
+        batch, 
+        seq_len, 
+        input_ids.device, 
+        explanation_decision_boundary,
+        reference_model,
+        training_model=model,  # Pass the current model as the training model
+        evidence_selection_strategy=evidence_selection_strategy,
+        explanation_method=explanation_method,
+    )
 
-    # Forward with masked pooling; also request token-level logits for the aux loss
+    # Forward with masked pooling; also request token-level logits for the aux loss if using token loss
     doc_logits, tok_logits = model.forward_with_selected_tokens(
         input_ids=input_ids,
         attention_masks=attention_masks,
         selected_token_mask=sel_mask,
         stop_gradient_unselected=stop_gradient_unselected,
-        return_token_logits=True,
+        return_token_logits=lambda_aux>0,
         output_attentions=False,
         mask_pooling=mask_pooling,
         soft_alpha=soft_alpha,
@@ -666,8 +785,9 @@ def masked_pooling_aux_loss(
     doc_loss = torch.nn.functional.binary_cross_entropy_with_logits(doc_logits, targets)
     total_loss = doc_loss
 
-    # Auxiliary token-level loss (only if we have a selection mask and token logits)
-    if (sel_mask is not None) and (tok_logits is not None):
+    # Auxiliary token-level loss (only if we have a selection mask, token logits, and token loss is enabled)
+    # if use_token_loss and (sel_mask is not None) and (tok_logits is not None):
+    if lambda_aux > 0 and (sel_mask is not None) and (tok_logits is not None):
         B, L, C = tok_logits.shape
         tgt_broadcast = targets.unsqueeze(1).expand(B, L, C)  # (B, L, C)
 
