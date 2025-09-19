@@ -91,7 +91,6 @@ def main(cfg: OmegaConf) -> None:
     dataset_path = Path(cfg.data.dataset_path)
     model_path = Path(cfg.load_model) if cfg.load_model is not None else None
     
-    reference_model_path = Path(cfg.loss.configs.reference_model_path) if cfg.loss.configs.reference_model_path is not None else None
     dataset = load_dataset(str(dataset_path), trust_remote_code=True)
 
     text_tokenizer = AutoTokenizer.from_pretrained(
@@ -195,6 +194,7 @@ def main(cfg: OmegaConf) -> None:
 
     if cfg.loss.name == 'masked_pooling_aux_loss':
         LOGGER.info("Loading reference model for masked_pooling_aux_loss")
+        reference_model_path = Path(cfg.loss.configs.reference_model_path) if cfg.loss.configs.reference_model_path is not None else None
         reference_model, reference_decision_boundary, explanation_decision_boundary, explainer_callable = load_and_prepare_reference_model(
             cfg,
             reference_model_path,

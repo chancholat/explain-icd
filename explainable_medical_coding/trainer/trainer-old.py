@@ -3,6 +3,7 @@ from collections import defaultdict
 from pathlib import Path
 from tempfile import mkdtemp
 from typing import Any, Callable, Optional
+from transformers import AutoTokenizer
 
 import pandas as pd
 import torch
@@ -11,6 +12,9 @@ from rich.pretty import pprint
 from rich.progress import track
 from torch.utils.data import DataLoader
 import sys
+import numpy as np
+import polars as pl
+
 
 sys.path.append("./")
 from explainable_medical_coding.eval.metrics import MetricCollection
@@ -18,6 +22,9 @@ from explainable_medical_coding.trainer.callbacks import BaseCallback
 from explainable_medical_coding.utils.datatypes import Lookups
 from explainable_medical_coding.utils.decision_boundary import f1_score_db_tuning
 from explainable_medical_coding.utils.settings import ID_COLUMN, TARGET_COLUMN
+from explainable_medical_coding.utils.analysis import get_explanations
+from explainable_medical_coding.config.factories import get_explainability_method
+from explainable_medical_coding.eval.plausibility_metrics import find_explanation_decision_boundary
 
 
 class Trainer:
@@ -57,13 +64,45 @@ class Trainer:
         self.current_val_results: dict[str, dict[str, torch.Tensor]] = {}
         self.stop_training = False
         self.best_db = 0.5
+        
+        # Add wrapper for loss function to include common parameters
+        self._original_loss_function = self.loss_function
+        self.loss_function = self._wrapped_loss_function
+        
         self.on_initialisation_end()
 
+    def _wrapped_loss_function(self, batch, model, **kwargs):
+        """Wrapper for loss function to include common parameters."""
+        # Check if we're using masked_pooling_aux_loss
+        is_efective_loss = (self.config.loss.name == 'masked_pooling_aux_loss')
+        
+        if is_efective_loss:
+            # Add use_token_loss from config if not explicitly provided
+            if 'use_token_loss' not in kwargs and hasattr(self.config.loss, 'configs') and hasattr(self.config.loss.configs, 'use_token_loss'):
+                kwargs['use_token_loss'] = self.config.loss.configs.use_token_loss
+                
+            # Add evidence_selection_strategy from config
+            if hasattr(self.config.loss.configs, 'evidence_selection_strategy'):
+                kwargs['evidence_selection_strategy'] = self.config.loss.configs.evidence_selection_strategy
+            
+            # Add explanation_method from config
+            if hasattr(self.config.loss.configs, 'explanation_method'):
+                kwargs['explanation_method'] = self.config.loss.configs.explanation_method
+
+            # Convert OmegaConf to dict and update kwargs with all config params
+            for key, value in OmegaConf.to_container(self.config.loss.configs).items():
+                # Don't override already set parameters
+                if key not in kwargs:
+                    kwargs[key] = value
+        
+        return self._original_loss_function(batch, model=model, **kwargs)
+      
     def fit(self) -> None:
         """Train and validate the model."""
         try:
             self.save_configs()
             self.on_fit_begin()
+
             for _ in range(self.epoch, self.epochs):
                 if self.stop_training:
                     break
@@ -105,7 +144,7 @@ class Trainer:
                     batch,
                     model=self.model,
                     scale=self.gradient_scaler.get_scale(),
-                    epoch=epoch,
+                    epoch=epoch
                 )
                 loss = loss / self.accumulate_grad_batches
             self.gradient_scaler.scale(loss).backward()
@@ -150,7 +189,8 @@ class Trainer:
                 device_type="cuda", enabled=self.use_amp, dtype=torch.bfloat16
             ):
                 y_probs, targets, loss = self.loss_function(
-                    batch.to(self.device), model=self.model
+                    batch.to(self.device),
+                    model=self.model,
                 )
             self.update_metrics(
                 y_probs=y_probs, targets=targets, loss=loss, split_name=split_name
@@ -179,7 +219,8 @@ class Trainer:
                 device_type="cuda", enabled=self.use_amp, dtype=torch.bfloat16
             ):
                 y_probs, targets, loss = self.loss_function(
-                    batch.to(self.device), model=self.model
+                    batch.to(self.device),
+                    model=self.model,
                 )
             self.update_metrics(
                 y_probs=y_probs, targets=targets, loss=loss, split_name=split_name
@@ -370,13 +411,19 @@ class Trainer:
         pprint("Saved checkpoint to {}".format(self.experiment_path / file_name))
 
     def load_checkpoint(self, file_name: str) -> None:
-        checkpoint = torch.load(self.experiment_path / file_name)
+        """Load a checkpoint from a file.
+        
+        Args:
+            file_name (str): The name of the checkpoint file
+        """
+        checkpoint = torch.load(self.experiment_path / file_name, weights_only=False)
         self.model.load_state_dict(checkpoint["model"])
         self.optimizer.load_state_dict(checkpoint["optimizer"])
         self.gradient_scaler.load_state_dict(checkpoint["scaler"])
         self.epoch = checkpoint["epoch"]
         self.best_db = checkpoint["db"]
-        pprint("Loaded checkpoint from {}".format(self.experiment_path / file_name))
+        
+        pprint(f"Loaded checkpoint from {self.experiment_path / file_name}")
 
     def save_configs(self) -> None:
         self.lookups.target_tokenizer.save(
