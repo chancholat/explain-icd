@@ -96,19 +96,37 @@ class LabelCrossAttention(nn.Module):
         #     torch.isnan(att_weights), torch.tensor(30000), att_weights
         # )
         if attention_masks is not None:
-            # pad attention masks with 0 such that it has the same sequence lenght as x
-            attention_masks = torch.nn.functional.pad(
-                attention_masks, (0, x.size(1) - attention_masks.size(1)), value=0
-            )
-            attention_masks = attention_masks.to(torch.bool)
-            # repeat attention masks for each class
-            attention_masks = attention_masks.unsqueeze(1).repeat(
-                1, self.num_classes, 1
-            )
-            attention_masks = attention_masks.masked_fill_(
-                attention_masks.logical_not(), float("-inf")
-            )
-            att_weights += attention_masks
+            # Check if this is an effective 3D mask (B, NC, L) or regular 2D mask (B, L)
+            if attention_masks.dim() == 3 and attention_masks.size(1) == self.num_classes:
+                # This is already an effective 3D mask with class-specific attention
+                # Pad sequence dimension if needed
+                if attention_masks.size(2) < x.size(1):
+                    attention_masks = torch.nn.functional.pad(
+                        attention_masks, (0, x.size(1) - attention_masks.size(2)), value=0
+                    )
+                elif attention_masks.size(2) > x.size(1):
+                    attention_masks = attention_masks[:, :, :x.size(1)]
+                
+                # Convert to boolean and apply mask
+                attention_masks = attention_masks.to(torch.bool)
+                attention_masks = attention_masks.masked_fill_(
+                    attention_masks.logical_not(), float("-inf")
+                )
+                att_weights += attention_masks
+            else:
+                # Regular 2D mask - broadcast for each class as before
+                attention_masks = torch.nn.functional.pad(
+                    attention_masks, (0, x.size(1) - attention_masks.size(1)), value=0
+                )
+                attention_masks = attention_masks.to(torch.bool)
+                # repeat attention masks for each class
+                attention_masks = attention_masks.unsqueeze(1).repeat(
+                    1, self.num_classes, 1
+                )
+                attention_masks = attention_masks.masked_fill_(
+                    attention_masks.logical_not(), float("-inf")
+                )
+                att_weights += attention_masks
 
         attention = torch.softmax(
             att_weights / self.scale, dim=2

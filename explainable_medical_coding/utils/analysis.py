@@ -260,7 +260,8 @@ def calculate_selected_mask_ids(
         explanation_decision_boundary, 
         device="cuda", 
         decision_boundary=0.5,
-        stride=0
+        stride=0,
+        num_classes=None
     ):
     """Calculate selected mask ids for an example by aggregating attribution tokens across all target ids.
     
@@ -287,6 +288,7 @@ def calculate_selected_mask_ids(
         # Batched data - process each example
         batch_size = len(input_ids)
         all_selected_mask_ids = []
+        all_effective_masks = []
         
         for i in range(batch_size):
             # Create single example dict
@@ -296,42 +298,53 @@ def calculate_selected_mask_ids(
             }
             
             # Process single example
-            result = calculate_selected_mask_ids_single(
+            result = calculate_selected_mask_ids_and_effective_mask(
                 explainer_callable=explainer_callable,
                 reference_model=reference_model,
                 x=single_x,
                 explanation_decision_boundary=explanation_decision_boundary,
                 device=device,
                 decision_boundary=decision_boundary,
-                stride=stride
+                stride=stride,
+                num_classes=num_classes
             )
             all_selected_mask_ids.append(result["selected_mask_ids"])
+            all_effective_masks.append(result["effective_attention_mask"])
         
-        return {"selected_mask_ids": all_selected_mask_ids}
+        return {
+            "selected_mask_ids": all_selected_mask_ids,
+            "effective_attention_mask": all_effective_masks
+        }
     
     else:
         # Single example - call the single processing function
-        return calculate_selected_mask_ids_single(
+        return calculate_selected_mask_ids_and_effective_mask(
             explainer_callable=explainer_callable,
             reference_model=reference_model,
             x=x,
             explanation_decision_boundary=explanation_decision_boundary,
             device=device,
             decision_boundary=decision_boundary,
-            stride=stride
+            stride=stride,
+            num_classes=num_classes
         )
 
 
-def calculate_selected_mask_ids_single(
+def calculate_selected_mask_ids_and_effective_mask(
         explainer_callable, 
         reference_model, 
         x, 
         explanation_decision_boundary, 
         device="cuda", 
         decision_boundary=0.5,
-        stride=0
+        stride=0,
+        num_classes=None
     ):
-    """Calculate selected mask ids for a single example."""
+    """Calculate selected mask ids and effective attention mask for a single example.
+    
+    Returns both the union of selected tokens (for backward compatibility) and
+    a class-specific 3D attention mask indicating which tokens contribute to each class.
+    """
     # Get input_ids and ensure it's on the right device and has batch dimension
     input_ids = x["input_ids"]
     if isinstance(input_ids, torch.Tensor):
@@ -341,6 +354,8 @@ def calculate_selected_mask_ids_single(
     else:
         # Convert list to tensor
         input_ids = torch.tensor(input_ids, dtype=torch.long).unsqueeze(0).to(device)
+    
+    sequence_length = input_ids.size(1)
     
     # Get ground truth target_ids
     if "target_ids" in x:
@@ -359,7 +374,12 @@ def calculate_selected_mask_ids_single(
     )
     
     if len(target_ids) == 0:
-        return {"selected_mask_ids": []}
+        # Return empty masks
+        effective_mask = torch.zeros((num_classes or 1, sequence_length), dtype=torch.float32) if num_classes else None
+        return {
+            "selected_mask_ids": [],
+            "effective_attention_mask": effective_mask
+        }
     
     # Calculate attributions using the explainer
     attributions = explainer_callable(
@@ -368,20 +388,33 @@ def calculate_selected_mask_ids_single(
         device=device,
     )  # [sequence_length, num_target_classes]
     
+    # Initialize effective attention mask (num_classes, sequence_length)
+    if num_classes is None:
+        num_classes = y_probs.size(0)  # Infer from model output
+    
+    effective_mask = torch.zeros((num_classes, sequence_length), dtype=torch.float32)
+    
     # Convert attributions to token ids for each target and aggregate (union)
     all_selected_token_ids = set()
     
-    for idx in range(attributions.shape[1]):  # iterate over target classes
+    from explainable_medical_coding.eval.plausibility_metrics import attributions2token_ids
+    
+    for idx, target_id in enumerate(target_ids):  # iterate over target classes
         target_attributions = attributions[:, idx].tolist()
-        # Use the existing attributions2token_ids function from plausibility_metrics
-        from explainable_medical_coding.eval.plausibility_metrics import attributions2token_ids
         selected_token_ids = attributions2token_ids(target_attributions, explanation_decision_boundary)
+        
+        # Add to union for backward compatibility
         all_selected_token_ids.update(selected_token_ids)
+        
+        # Set effective mask for this class
+        for token_id in selected_token_ids:
+            if 0 <= token_id < sequence_length:
+                effective_mask[target_id.item(), token_id] = 1.0
     
     # Apply stride window effect if stride > 0
     if stride > 0:
         expanded_token_ids = set()
-        sequence_length = attributions.shape[0]
+        effective_mask_expanded = effective_mask.clone()
         
         for token_id in all_selected_token_ids:
             # Add the original token
@@ -393,13 +426,23 @@ def calculate_selected_mask_ids_single(
                 # Ensure the new token is within valid range
                 if 0 <= new_token_id < sequence_length:
                     expanded_token_ids.add(new_token_id)
+                    
+                    # Also expand in the effective mask
+                    for class_idx in range(num_classes):
+                        if effective_mask[class_idx, token_id] > 0:
+                            if 0 <= new_token_id < sequence_length:
+                                effective_mask_expanded[class_idx, new_token_id] = 1.0
         
         all_selected_token_ids = expanded_token_ids
+        effective_mask = effective_mask_expanded
     
     # Convert set back to sorted list
     selected_mask_ids = sorted(list(all_selected_token_ids))
     
-    return {"selected_mask_ids": selected_mask_ids}
+    return {
+        "selected_mask_ids": selected_mask_ids,
+        "effective_attention_mask": effective_mask
+    }
 
 
 @torch.no_grad()

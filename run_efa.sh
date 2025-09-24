@@ -8,8 +8,6 @@
 #SBATCH --mail-type=END,TIME_LIMIT
 #SBATCH --mail-user=thin.nguyen@deakin.edu.au
 
-set -euo pipefail
-
 # ---------------- Env ----------------
 module load Anaconda3
 source activate
@@ -23,100 +21,65 @@ MAX_BATCH=16
 BATCH=16
 GPU=0
 
-# ---------------- Allowed options (for index-based inject) ----------------
-LRS=(5e-5 1e-5)
-METHODS=(laat grad_attention)
-REFS=("models/supervised/ym0o7co8" "models/supervised_attention_full_target")
+# ---------------- Grids ----------------
+LRS=(5e-5 1e-5)                          # $1 -> 0..1
+METHODS=(laat grad_attention)            # $2 -> 0..1
+REFS=("models/supervised/ym0o7co8" "models/supervised_attention_full_target")  # $3 -> 0..1
 WINDOW_STRIDES=(6 10 15 20)
 
 # Fixed singletons
 SOFT_ALPHA=0.3
 LAMBDA_AUX=0
 
-# ---------------- Helpers ----------------
-is_integer() { [[ "$1" =~ ^[0-9]+$ ]]; }
-is_float()   { [[ "$1" =~ ^([0-9]*\.)?[0-9]+([eE][-+]?[0-9]+)?$ ]]; }
-
-resolve_lr() {
-  local arg="$1"
-  if is_integer "$arg"; then
-    (( arg < 0 || arg >= ${#LRS[@]} )) && { echo "LR index out of range" ; return 1; }
-    echo "${LRS[$arg]}"
-  elif is_float "$arg"; then
-    echo "$arg"
-  else
-    echo "Invalid LR: '$arg' (use index or float)"; return 1
-  fi
-}
-
-resolve_method() {
-  local arg="$1"
-  if is_integer "$arg"; then
-    (( arg < 0 || arg >= ${#METHODS[@]} )) && { echo "METHOD index out of range"; return 1; }
-    echo "${METHODS[$arg]}"
-  else
-    for m in "${METHODS[@]}"; do
-      [[ "$m" == "$arg" ]] && { echo "$m"; return 0; }
-    done
-    echo "Unknown METHOD: '$arg' (valid: ${METHODS[*]})"; return 1
-  fi
-}
-
-resolve_ref() {
-  local arg="$1"
-  if is_integer "$arg"; then
-    (( arg < 0 || arg >= ${#REFS[@]} )) && { echo "REF index out of range"; return 1; }
-    echo "${REFS[$arg]}"
-  else
-    echo "$arg"   # treat as explicit path
-  fi
-}
-
-usage() {
-  cat <<EOF
-Usage (inject-only):
-  sbatch $0 <LR> <METHOD> <REF>
-
-  <LR>      = index into LRS (${!LRS[@]}) or a float (e.g., 3e-5)
-  <METHOD>  = index into METHODS (${!METHODS[@]}) or name (${METHODS[*]})
-  <REF>     = index into REFS (${!REFS[@]}) or a path
-
-Examples:
-  sbatch $0 0 1 0
-  sbatch $0 3e-5 laat 0
-EOF
-}
-
-# ---------------- Parse & resolve ----------------
-if [[ $# -ne 3 ]]; then
-  usage
+# ---------------- Parse CLI args ----------------
+if [[ $# -lt 3 ]]; then
+  echo "Usage: sbatch $0 <lr_idx:0-1> <method_idx:0-1> <ref_idx:0-1>"
   exit 1
 fi
 
-if ! _out="$(resolve_lr "$1")"; then echo "$_out"; exit 2; fi
-LR="$_out"
-if ! _out="$(resolve_method "$2")"; then echo "$_out"; exit 3; fi
-METHOD="$_out"
-if ! _out="$(resolve_ref "$3")"; then echo "$_out"; exit 4; fi
-REF="$_out"
+lr_idx="$1"
+method_idx="$2"
+ref_idx="$3"
 
-mkdir -p logs
-JID="${SLURM_JOB_ID:-local$$}"
-STAMP="$(date +%Y%m%d-%H%M%S)"
+# Basic bounds checks
+if (( lr_idx < 0 || lr_idx >= ${#LRS[@]} )); then
+  echo "ERROR: lr_idx out of range (0..$(( ${#LRS[@]}-1 )))"; exit 2
+fi
+if (( method_idx < 0 || method_idx >= ${#METHODS[@]} )); then
+  echo "ERROR: method_idx out of range (0..$(( ${#METHODS[@]}-1 )))"; exit 3
+fi
+if (( ref_idx < 0 || ref_idx >= ${#REFS[@]} )); then
+  echo "ERROR: ref_idx out of range (0..$(( ${#REFS[@]}-1 )))"; exit 4
+fi
+
+LR="${LRS[$lr_idx]}"
+METHOD="${METHODS[$method_idx]}"
+REF="${REFS[$ref_idx]}"
 
 echo "=== JOB ${SLURM_JOB_ID:-N/A} on $(hostname) ==="
 echo "Injected: LR=${LR}, METHOD=${METHOD}, REF=${REF}"
 echo "Fixed: EXPERIMENT=${EXPERIMENT}, BATCH=${BATCH}, GPU=${GPU}"
+echo "Will sweep: window_strides × ${#WINDOW_STRIDES[@]}"
 echo "-----------------------------------------------"
 
+mkdir -p logs
+
+JID="${SLURM_JOB_ID:-local$$}"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+
+# ---------------- One loop over window_stride ----------------
 for WINDOW_STRIDE in "${WINDOW_STRIDES[@]}"; do
   REF_BASENAME="$(basename "$REF")"
   TAG="lr${LR}_sa${SOFT_ALPHA}_${METHOD}_${REF_BASENAME}_ws${WINDOW_STRIDE}"
   LOG="logs/plm_${TAG}_job${JID}_${STAMP}.out"
   ERR="logs/plm_${TAG}_job${JID}_${STAMP}.err"
 
-  CMD=(
-    srun -N1 -n1 python train_plm.py
+  echo ""
+  echo ">> RUN ${TAG}"
+  echo "   -> log: ${LOG}"
+  echo "   -> err: ${ERR}"
+
+  CMD=( python train_plm.py
     "experiment=${EXPERIMENT}"
     "dataloader.max_batch_size=${MAX_BATCH}"
     "dataloader.batch_size=${BATCH}"
@@ -124,11 +87,10 @@ for WINDOW_STRIDE in "${WINDOW_STRIDES[@]}"; do
     "optimizer.configs.lr=${LR}"
     "loss.configs.soft_alpha=${SOFT_ALPHA}"
     "loss.configs.lambda_aux=${LAMBDA_AUX}"
-    "loss.configs.use_token_loss=False"
+    "loss.configs.use_token_loss=True"
     "loss.configs.evidence_selection_strategy=reference_model"
     "loss.configs.reference_model_path=${REF}"
     "loss.configs.fallback_to_full_attention_if_empty=False"
-    "loss.configs.mask_pooling=True"
     "loss.configs.explanation_method=${METHOD}"
     "loss.configs.window_stride=${WINDOW_STRIDE}"
   )
@@ -139,19 +101,18 @@ for WINDOW_STRIDE in "${WINDOW_STRIDES[@]}"; do
     echo "LR=${LR}"
     echo "explanation_method=${METHOD}"
     echo "reference_model_path=${REF}"
+    echo "window_stride=${WINDOW_STRIDE}"
     echo "[CMD] ${CMD[*]}"
     echo "-------------------------------------------"
   } >"$LOG"
 
-  # run and capture exit code properly
   "${CMD[@]}" >>"$LOG" 2>"$ERR"
-  status=$?
 
-  if [[ $status -eq 0 ]]; then
+  if [[ $? -eq 0 ]]; then
     echo "✅ Done: ${TAG}" | tee -a "$LOG"
   else
     echo "❌ Failed: ${TAG} (see $ERR)" | tee -a "$LOG"
   fi
 done
 
-echo "=== ALL DONE ==="
+echo "=== All runs completed for LR=${LR}, METHOD=${METHOD}, REF=${REF} ==="

@@ -599,6 +599,43 @@ def fgsm(
 
     return delta
 
+def _build_effective_attention_mask_from_batch(batch, seq_len: int, device: torch.device):
+    """Return a (B, NC, L) 0/1 mask for class-specific attention if available, else None."""
+    if hasattr(batch, "effective_attention_mask") and batch.effective_attention_mask is not None:
+        effective_masks = batch.effective_attention_mask
+        
+        if isinstance(effective_masks, list):
+            # Convert list of (NC, L) tensors to (B, NC, L) tensor
+            if len(effective_masks) > 0 and effective_masks[0] is not None:
+                # Stack all masks along batch dimension
+                effective_mask_tensor = torch.stack(effective_masks, dim=0)  # (B, NC, L)
+                
+                # Pad sequence dimension if needed
+                if effective_mask_tensor.size(2) < seq_len:
+                    pad_len = seq_len - effective_mask_tensor.size(2)
+                    effective_mask_tensor = torch.nn.functional.pad(
+                        effective_mask_tensor, (0, pad_len), value=0.0
+                    )
+                elif effective_mask_tensor.size(2) > seq_len:
+                    effective_mask_tensor = effective_mask_tensor[:, :, :seq_len]
+                
+                return effective_mask_tensor.to(device)
+        elif isinstance(effective_masks, torch.Tensor):
+            # Already a tensor
+            if effective_masks.dim() == 3:  # (B, NC, L)
+                # Pad sequence dimension if needed
+                if effective_masks.size(2) < seq_len:
+                    pad_len = seq_len - effective_masks.size(2)
+                    effective_masks = torch.nn.functional.pad(
+                        effective_masks, (0, pad_len), value=0.0
+                    )
+                elif effective_masks.size(2) > seq_len:
+                    effective_masks = effective_masks[:, :, :seq_len]
+                
+                return effective_masks.to(device)
+    
+    return None
+
 def _build_selected_mask_from_batch(batch, seq_len: int, device: torch.device):
     """Return a (B, L) 0/1 mask if available, else None.
     Tries batch.selected_token_mask first; otherwise unions indices in batch.evidence_input_ids.
@@ -676,11 +713,15 @@ def masked_pooling_aux_loss(
 
     seq_len = input_ids.size(1)
     sel_mask = _build_selected_mask_from_batch(batch, seq_len, input_ids.device)
+    effective_mask = _build_effective_attention_mask_from_batch(batch, seq_len, input_ids.device)
+
+    # Use effective mask if available, otherwise fall back to regular attention masks
+    masks_to_use = effective_mask if effective_mask is not None else attention_masks
 
     # Forward with masked pooling; also request token-level logits for the aux loss
     doc_logits, tok_logits = model.forward_with_selected_tokens(
         input_ids=input_ids,
-        attention_masks=attention_masks,
+        attention_masks=masks_to_use,
         selected_token_mask=sel_mask,
         stop_gradient_unselected=stop_gradient_unselected,
         return_token_logits=lambda_aux>0,

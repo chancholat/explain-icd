@@ -207,7 +207,8 @@ def main(cfg: OmegaConf) -> None:
         print(f"Explanation decision boundary: {explanation_decision_boundary}")
         print(f"Reference decision boundary: {reference_decision_boundary}")
         from explainable_medical_coding.utils.analysis import calculate_selected_mask_ids
-        LOGGER.info("Adding selected_mask_ids to dataset using reference model")
+        LOGGER.info("Adding selected_mask_ids and effective_attention_mask to dataset using reference model")
+        num_classes = lookups.data_info["num_classes"]
         dataset = dataset.map(
             lambda x:  calculate_selected_mask_ids(
                 explainer_callable=explainer_callable,
@@ -216,7 +217,8 @@ def main(cfg: OmegaConf) -> None:
                 explanation_decision_boundary=explanation_decision_boundary,
                 device=device,
                 decision_boundary=reference_decision_boundary,
-                stride=cfg.loss.configs.get('stride', 0)
+                stride=cfg.loss.configs.get('stride', 0),
+                num_classes=num_classes
             ),
             desc="Adding reference model masking",
             batched=True,

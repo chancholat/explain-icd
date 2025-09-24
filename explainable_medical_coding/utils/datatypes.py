@@ -34,6 +34,7 @@ class Batch:
     
     evidence_input_ids: Optional[Sequence[Sequence[Sequence[int]]]] = None
     selected_mask_ids: Optional[torch.Tensor] = None  # (B, L) 0/1 mask for selected tokens
+    effective_attention_mask: Optional[torch.Tensor] = None  # (B, NC, L) 0/1 mask with class-specific attributions
 
     def to(self, device: Any) -> "Batch":
         """Move the batch to a device.
@@ -54,6 +55,9 @@ class Batch:
         if self.original_target_ids is not None:
             self.original_target_ids = [ids.to(device, non_blocking=True) if isinstance(ids, torch.Tensor) else ids
                                       for ids in self.original_target_ids]
+        # Handle effective attention mask if present
+        if self.effective_attention_mask is not None:
+            self.effective_attention_mask = self.effective_attention_mask.to(device, non_blocking=True)
         return self
 
     # custom memory pinning method on custom type
@@ -68,4 +72,7 @@ class Batch:
         if self.original_target_ids is not None:
             self.original_target_ids = [ids.pin_memory() if isinstance(ids, torch.Tensor) else ids
                                        for ids in self.original_target_ids]
+        # Handle effective attention mask if present
+        if self.effective_attention_mask is not None:
+            self.effective_attention_mask = self.effective_attention_mask.pin_memory()
         return self
