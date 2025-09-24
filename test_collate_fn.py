@@ -17,41 +17,52 @@ from explainable_medical_coding.utils.tokenizer import TargetTokenizer
 def test_collate_fn():
     """Test that collate_fn correctly converts list of effective masks to tensor"""
     
-    print("Testing collate_fn with effective_attention_mask...")
+    print("Testing collate_fn with effective_attention_mask (different sequence lengths)...")
     
     # Mock data setup
     batch_size = 3
-    seq_len = 8
     num_classes = 4
     
-    # Create mock dataset
+    # Create mock dataset with different sequence lengths per example
     mock_data = {
-        "input_ids": [[1, 2, 3, 4, 0, 0, 0, 0] for _ in range(batch_size)],
-        "attention_mask": [[1, 1, 1, 1, 0, 0, 0, 0] for _ in range(batch_size)],
+        "input_ids": [
+            [1, 2, 3, 4, 0, 0],           # 6 tokens 
+            [1, 2, 3, 4, 5, 6, 7, 8],      # 8 tokens
+            [1, 2, 3, 4, 5]                # 5 tokens
+        ],
+        "attention_mask": [
+            [1, 1, 1, 1, 0, 0],
+            [1, 1, 1, 1, 1, 1, 1, 1], 
+            [1, 1, 1, 1, 1]
+        ],
         "target_ids": [[0, 1], [1, 2], [0, 2, 3]],
-        "length": [4, 4, 4],
+        "length": [4, 8, 5],
         "_id": [0, 1, 2],
         "text": ["sample text"] * batch_size,
         "targets": [["class_0", "class_1"], ["class_1", "class_2"], ["class_0", "class_2", "class_3"]],
         "effective_attention_mask": []
     }
     
-    # Create effective attention masks (list of tensors)
+    # Create effective attention masks with different sequence lengths
+    seq_lens = [6, 8, 5]  # Different lengths per example
     for i in range(batch_size):
+        seq_len = seq_lens[i]
         mask = torch.zeros(num_classes, seq_len)
+        
         # Set different patterns for each example
-        if i == 0:
+        if i == 0:  # 6 tokens
             mask[0, :2] = 1  # Class 0: first 2 tokens
             mask[1, 2:4] = 1  # Class 1: tokens 2-3
-        elif i == 1:
+        elif i == 1:  # 8 tokens
             mask[1, :3] = 1  # Class 1: first 3 tokens
-            mask[2, 3:5] = 1  # Class 2: tokens 3-4
-        else:  # i == 2
+            mask[2, 3:6] = 1  # Class 2: tokens 3-5
+        else:  # i == 2, 5 tokens
             mask[0, :1] = 1  # Class 0: first token
             mask[2, 1:3] = 1  # Class 2: tokens 1-2
-            mask[3, 4:6] = 1  # Class 3: tokens 4-5
+            mask[3, 3:5] = 1  # Class 3: tokens 3-4
         
         mock_data["effective_attention_mask"].append(mask)
+        print(f"  Example {i}: mask shape {mask.shape} (seq_len={seq_len})")
     
     # Create HuggingFace dataset
     hf_dataset = Dataset.from_dict(mock_data)
@@ -74,10 +85,25 @@ def test_collate_fn():
     
     if batch.effective_attention_mask is not None:
         print(f"  Effective attention mask shape: {batch.effective_attention_mask.shape}")
-        expected_shape = (batch_size, num_classes, seq_len)
+        max_seq_len = max(seq_lens)  # Should be 8
+        expected_shape = (batch_size, num_classes, max_seq_len)
         
         if batch.effective_attention_mask.shape == expected_shape:
             print(f"  ✓ Effective mask has correct shape: {expected_shape}")
+            print(f"  ✓ All sequences padded to max length: {max_seq_len}")
+            
+            # Test that padding worked correctly
+            for i in range(batch_size):
+                original_len = seq_lens[i]
+                mask_example = batch.effective_attention_mask[i]
+                
+                # Check that positions beyond original length are all zeros
+                if original_len < max_seq_len:
+                    padded_region = mask_example[:, original_len:]
+                    if torch.all(padded_region == 0):
+                        print(f"  ✓ Example {i}: padding region is correctly zero")
+                    else:
+                        print(f"  ✗ Example {i}: padding region has non-zero values")
             
             # Test device movement
             if torch.cuda.is_available():

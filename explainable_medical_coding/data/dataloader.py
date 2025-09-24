@@ -124,12 +124,26 @@ class BaseDataset(torch.utils.data.Dataset):
             effective_attention_mask_list = batch["effective_attention_mask"]
             # Convert list of tensors to a single batched tensor
             if effective_attention_mask_list and effective_attention_mask_list[0] is not None:
-                # Stack all masks along batch dimension: (B, NC, L)
-                effective_attention_mask = torch.stack(effective_attention_mask_list, dim=0)
+                # Find the maximum sequence length across all masks
+                max_seq_len = max(mask.size(-1) for mask in effective_attention_mask_list if mask is not None)
+                
+                # Pad all masks to the same sequence length and stack them
+                padded_masks = []
+                for mask in effective_attention_mask_list:
+                    # Pad the sequence dimension (last dimension) to max_seq_len
+                    if mask.size(-1) < max_seq_len:
+                        pad_len = max_seq_len - mask.size(-1)
+                        padded_mask = torch.nn.functional.pad(mask, (0, pad_len), value=0.0)
+                    else:
+                        padded_mask = mask
+                    padded_masks.append(padded_mask)
+                
+                # Now stack all padded masks along batch dimension: (B, NC, L)
+                effective_attention_masks = torch.stack(padded_masks, dim=0)
             else:
-                effective_attention_mask = None
+                effective_attention_masks = None
         else:
-            effective_attention_mask = None
+            effective_attention_masks = None
 
         if "note_id" in batch.column_names:
             note_ids = batch["note_id"]
@@ -154,5 +168,5 @@ class BaseDataset(torch.utils.data.Dataset):
             teacher_logits=teacher_logits,
             original_target_ids=original_target_ids,  # Add the original target IDs
             selected_mask_ids=selected_mask_ids,
-            effective_attention_mask=effective_attention_mask,
+            effective_attention_masks=effective_attention_masks,
         )
