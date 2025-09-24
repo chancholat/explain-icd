@@ -73,6 +73,6 @@ class Batch:
             self.original_target_ids = [ids.pin_memory() if isinstance(ids, torch.Tensor) else ids
                                        for ids in self.original_target_ids]
         # Handle effective attention mask if present
-        if self.effective_attention_mask is not None:
-            self.effective_attention_mask = self.effective_attention_mask.pin_memory()
+        if self.effective_attention_masks is not None:
+            self.effective_attention_masks = self.effective_attention_masks.pin_memory()
         return self

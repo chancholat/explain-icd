@@ -601,8 +601,8 @@ def fgsm(
 
 def _build_effective_attention_mask_from_batch(batch, seq_len: int, device: torch.device):
     """Return a (B, NC, L) 0/1 mask for class-specific attention if available, else None."""
-    if hasattr(batch, "effective_attention_mask") and batch.effective_attention_mask is not None:
-        effective_masks = batch.effective_attention_mask
+    if hasattr(batch, "effective_attention_masks") and batch.effective_attention_masks is not None:
+        effective_masks = batch.effective_attention_masks
         
         if isinstance(effective_masks, torch.Tensor):
             # Already a tensor (should be the case after collate_fn processing)
