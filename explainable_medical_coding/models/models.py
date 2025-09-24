@@ -436,6 +436,7 @@ class PLMICD(nn.Module):
             mask_pooling: bool = True,                      # NEW: control whether to mask pooling
             soft_alpha: float = 0.0,                        # NEW: soft weight for unselected tokens in pooling (0.0 = hard mask)
             fallback_to_full_attention_if_empty: bool = True,  # NEW: if a sample selects nothing, keep original attention for that sample
+            effective_attention_mask: Optional[torch.Tensor] = None,
         ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
             """
             Encoder once; optionally block gradients for unselected tokens; optionally mask pooling.
@@ -446,7 +447,8 @@ class PLMICD(nn.Module):
             """
             token_reps = self.encoder(input_ids, attention_masks)  # (B, L, H)
             # print("token reps:", token_reps.shape)
-            eff_attention = attention_masks  # (B, L)
+            # eff_attention = attention_masks  # (B, L)
+            eff_attention = effective_attention_mask if effective_attention_mask is not None else attention_masks
             if selected_token_mask is not None:
                 sel = selected_token_mask.to(token_reps.dtype)
                 pad_len = token_reps.size(1) - sel.size(1)
@@ -488,7 +490,8 @@ class PLMICD(nn.Module):
                         eff_attention = ea.to(attention_masks.dtype)
                 else:
                     # No pooling mask: use original attention (full context)
-                    eff_attention = attention_masks
+                    # eff_attention = attention_masks
+                    eff_attention = effective_attention_mask if effective_attention_mask is not None else attention_masks
 
             # Document-level logits via label-wise attention
             doc_logits = self.label_wise_attention(

@@ -716,6 +716,7 @@ def masked_pooling_aux_loss(
     effective_mask = _build_effective_attention_mask_from_batch(batch, seq_len, input_ids.device)
 
     # Use effective mask if available, otherwise fall back to regular attention masks
+
     masks_to_use = effective_mask if effective_mask is not None else attention_masks
 
     # Forward with masked pooling; also request token-level logits for the aux loss
@@ -729,6 +730,7 @@ def masked_pooling_aux_loss(
         mask_pooling=mask_pooling,
         soft_alpha=soft_alpha,
         fallback_to_full_attention_if_empty=fallback_to_full_attention_if_empty,
+        effective_attention_mask=effective_mask,
     )
 
     # Primary document-level loss
