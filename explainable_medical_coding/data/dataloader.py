@@ -120,10 +120,10 @@ class BaseDataset(torch.utils.data.Dataset):
         else:
             selected_mask_ids = None
 
-        if "effective_attention_masks" in batch.column_names:
-            effective_attention_masks = batch["effective_attention_masks"]
+        if "effective_attention_mask" in batch.column_names:
+            effective_attention_mask = batch["effective_attention_mask"]
         else:
-            effective_attention_masks = None
+            effective_attention_mask = None
 
         if "note_id" in batch.column_names:
             note_ids = batch["note_id"]
@@ -148,5 +148,5 @@ class BaseDataset(torch.utils.data.Dataset):
             teacher_logits=teacher_logits,
             original_target_ids=original_target_ids,  # Add the original target IDs
             selected_mask_ids=selected_mask_ids,
-            effective_attention_masks=effective_attention_masks,
+            effective_attention_mask=effective_attention_mask,
         )
