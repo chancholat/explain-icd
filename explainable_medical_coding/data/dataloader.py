@@ -121,7 +121,13 @@ class BaseDataset(torch.utils.data.Dataset):
             selected_mask_ids = None
 
         if "effective_attention_mask" in batch.column_names:
-            effective_attention_mask = batch["effective_attention_mask"]
+            effective_attention_mask_list = batch["effective_attention_mask"]
+            # Convert list of tensors to a single batched tensor
+            if effective_attention_mask_list and effective_attention_mask_list[0] is not None:
+                # Stack all masks along batch dimension: (B, NC, L)
+                effective_attention_mask = torch.stack(effective_attention_mask_list, dim=0)
+            else:
+                effective_attention_mask = None
         else:
             effective_attention_mask = None
 

@@ -604,8 +604,21 @@ def _build_effective_attention_mask_from_batch(batch, seq_len: int, device: torc
     if hasattr(batch, "effective_attention_mask") and batch.effective_attention_mask is not None:
         effective_masks = batch.effective_attention_mask
         
-        if isinstance(effective_masks, list):
-            # Convert list of (NC, L) tensors to (B, NC, L) tensor
+        if isinstance(effective_masks, torch.Tensor):
+            # Already a tensor (should be the case after collate_fn processing)
+            if effective_masks.dim() == 3:  # (B, NC, L)
+                # Pad sequence dimension if needed
+                if effective_masks.size(2) < seq_len:
+                    pad_len = seq_len - effective_masks.size(2)
+                    effective_masks = torch.nn.functional.pad(
+                        effective_masks, (0, pad_len), value=0.0
+                    )
+                elif effective_masks.size(2) > seq_len:
+                    effective_masks = effective_masks[:, :, :seq_len]
+                
+                return effective_masks.to(device)
+        elif isinstance(effective_masks, list):
+            # Fallback: Convert list of (NC, L) tensors to (B, NC, L) tensor
             if len(effective_masks) > 0 and effective_masks[0] is not None:
                 # Stack all masks along batch dimension
                 effective_mask_tensor = torch.stack(effective_masks, dim=0)  # (B, NC, L)
@@ -620,19 +633,6 @@ def _build_effective_attention_mask_from_batch(batch, seq_len: int, device: torc
                     effective_mask_tensor = effective_mask_tensor[:, :, :seq_len]
                 
                 return effective_mask_tensor.to(device)
-        elif isinstance(effective_masks, torch.Tensor):
-            # Already a tensor
-            if effective_masks.dim() == 3:  # (B, NC, L)
-                # Pad sequence dimension if needed
-                if effective_masks.size(2) < seq_len:
-                    pad_len = seq_len - effective_masks.size(2)
-                    effective_masks = torch.nn.functional.pad(
-                        effective_masks, (0, pad_len), value=0.0
-                    )
-                elif effective_masks.size(2) > seq_len:
-                    effective_masks = effective_masks[:, :, :seq_len]
-                
-                return effective_masks.to(device)
     
     return None
 
