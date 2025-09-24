@@ -123,7 +123,9 @@ class BaseDataset(torch.utils.data.Dataset):
         if "effective_attention_mask" in batch.column_names:
             effective_attention_mask_list = batch["effective_attention_mask"]
             # Convert list of tensors to a single batched tensor
-            if effective_attention_mask_list and effective_attention_mask_list[0] is not None:
+            if (effective_attention_mask_list is not None and 
+                len(effective_attention_mask_list) > 0 and 
+                effective_attention_mask_list[0] is not None):
                 # Find the maximum sequence length across all masks
                 max_seq_len = max(mask.size(-1) for mask in effective_attention_mask_list if mask is not None)
                 
