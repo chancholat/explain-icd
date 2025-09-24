@@ -722,7 +722,7 @@ def masked_pooling_aux_loss(
     # Forward with masked pooling; also request token-level logits for the aux loss
     doc_logits, tok_logits = model.forward_with_selected_tokens(
         input_ids=input_ids,
-        attention_masks=masks_to_use,
+        attention_masks=attention_masks,
         selected_token_mask=sel_mask,
         stop_gradient_unselected=stop_gradient_unselected,
         return_token_logits=lambda_aux>0,
@@ -730,7 +730,7 @@ def masked_pooling_aux_loss(
         mask_pooling=mask_pooling,
         soft_alpha=soft_alpha,
         fallback_to_full_attention_if_empty=fallback_to_full_attention_if_empty,
-        effective_attention_mask=effective_mask,
+        effective_attention_mask=masks_to_use,
     )
 
     # Primary document-level loss
