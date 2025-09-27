@@ -22,21 +22,31 @@ BATCH=16
 GPU=0
 
 # ---------------- Grids ----------------
-REFS=("models/supervised/ym0o7co8" "models/supervised_attention_full_target" "models/pgd/zauungyt" "models/igr/zmjo72tw" "models/tm/y5s1lj2j")  # $1 -> 0..4
-WINDOW_STRIDES=(6 10 15 20)
+LRS=(5e-5 1e-5)          # $1 -> 0..1
+METHODS=(laat grad_attention)  # $2 -> 0..1
+WINDOW_STRIDES=(3 6 10 15 20)
 
 # Fixed singletons
-LR=5e-5
+REF="models/supervised/ym0o7co8"
 SOFT_ALPHA=0
-METHOD="laat"
 LAMBDA_AUX=0
 
-ref_idx=$1
+lr_idx=$1
+method_idx=$2
 
-REF="${REFS[$ref_idx]}"
+if (( lr_idx < 0 || lr_idx >= ${#LRS[@]} )); then
+  echo "ERROR: lr_idx out of range (0..$(( ${#LRS[@]}-1 )))"; exit 2
+fi
+if (( method_idx < 0 || method_idx >= ${#METHODS[@]} )); then
+  echo "ERROR: method_idx out of range (0..$(( ${#METHODS[@]}-1 )))"; exit 3
+fi
+
+LR="${LRS[$lr_idx]}"
+METHOD="${METHODS[$method_idx]}"
+
 
 echo "=== JOB ${SLURM_JOB_ID:-N/A} on $(hostname) ==="
-echo "Injected: LR=${LR}, REF=${REF}"
+echo "Injected: LR=${LR}, METHOD=${METHOD}"
 echo "Fixed: EXPERIMENT=${EXPERIMENT}, BATCH=${BATCH}, GPU=${GPU}"
 echo "Will sweep: window_strides × ${#WINDOW_STRIDES[@]}"
 echo "-----------------------------------------------"
@@ -95,4 +105,4 @@ for WINDOW_STRIDE in "${WINDOW_STRIDES[@]}"; do
   fi
 done
 
-echo "=== All runs completed for LR=${LR}, REF=${REF} ==="
+echo "=== All runs completed for LR=${LR}, METHOD=${METHOD} ==="
