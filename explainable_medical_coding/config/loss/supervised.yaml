@@ -1,4 +1,3 @@
 name: kl_attention_loss
-
 configs:
   lambda_1: 2.5

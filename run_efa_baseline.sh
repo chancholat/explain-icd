@@ -22,17 +22,33 @@ BATCH=16
 GPU=0
 
 # ---------------- Grids ----------------
-REFS=("models/supervised/ym0o7co8" "models/supervised_attention_full_target" "models/pgd/zauungyt" "models/igr/zmjo72tw" "models/tm/y5s1lj2j")  # $1 -> 0..4
-WINDOW_STRIDES=(6 10 15 20)
+REFS=("models/supervised/ym0o7co8" "models/supervised_attention_full_target")  # $3 -> 0..1
+WINDOW_STRIDES=(6 10 15 20)              # $2 -> 0..3
 
 # Fixed singletons
-LR=5e-5
+LRS=5e-5                          # $1 -> 0..1
 SOFT_ALPHA=0
 METHOD="laat"
 LAMBDA_AUX=0
 
-ref_idx=$1
+# ---------------- Parse CLI args ----------------
+if [[ $# -lt 3 ]]; then
+  echo "Usage: sbatch $0 <lr_idx:0-1> <method_idx:0-1> <ref_idx:0-1>"
+  exit 1
+fi
 
+lr_idx=$1
+ref_idx=$2
+
+# Basic bounds checks
+if (( lr_idx < 0 || lr_idx >= ${#LRS[@]} )); then
+  echo "ERROR: lr_idx out of range (0..$(( ${#LRS[@]}-1 )))"; exit 2
+fi
+if (( ref_idx < 0 || ref_idx >= ${#REFS[@]} )); then
+  echo "ERROR: ref_idx out of range (0..$(( ${#REFS[@]}-1 )))"; exit 4
+fi
+
+LR="${LRS[$lr_idx]}"
 REF="${REFS[$ref_idx]}"
 
 echo "=== JOB ${SLURM_JOB_ID:-N/A} on $(hostname) ==="

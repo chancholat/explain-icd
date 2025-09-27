@@ -1,4 +1,4 @@
-name: masking_loss
+8name: masking_loss
 configs:
   lambda_1: 0.1
   total_epochs: 5
