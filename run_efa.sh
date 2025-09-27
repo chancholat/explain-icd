@@ -23,12 +23,12 @@ GPU=0
 
 # ---------------- Grids ----------------
 LRS=(5e-5 1e-5)                          # $1 -> 0..1
-METHODS=(laat grad_attention)            # $2 -> 0..1
 REFS=("models/supervised/ym0o7co8" "models/supervised_attention_full_target")  # $3 -> 0..1
 WINDOW_STRIDES=(6 10 15 20)
 
 # Fixed singletons
-SOFT_ALPHA=0.3
+SOFT_ALPHA=0
+METHOD="laat"
 LAMBDA_AUX=0
 
 # ---------------- Parse CLI args ----------------
@@ -37,27 +37,22 @@ if [[ $# -lt 3 ]]; then
   exit 1
 fi
 
-lr_idx="$1"
-method_idx="$2"
-ref_idx="$3"
+lr_idx=$1
+ref_idx=$2
 
 # Basic bounds checks
 if (( lr_idx < 0 || lr_idx >= ${#LRS[@]} )); then
   echo "ERROR: lr_idx out of range (0..$(( ${#LRS[@]}-1 )))"; exit 2
-fi
-if (( method_idx < 0 || method_idx >= ${#METHODS[@]} )); then
-  echo "ERROR: method_idx out of range (0..$(( ${#METHODS[@]}-1 )))"; exit 3
 fi
 if (( ref_idx < 0 || ref_idx >= ${#REFS[@]} )); then
   echo "ERROR: ref_idx out of range (0..$(( ${#REFS[@]}-1 )))"; exit 4
 fi
 
 LR="${LRS[$lr_idx]}"
-METHOD="${METHODS[$method_idx]}"
 REF="${REFS[$ref_idx]}"
 
 echo "=== JOB ${SLURM_JOB_ID:-N/A} on $(hostname) ==="
-echo "Injected: LR=${LR}, METHOD=${METHOD}, REF=${REF}"
+echo "Injected: LR=${LR}, REF=${REF}"
 echo "Fixed: EXPERIMENT=${EXPERIMENT}, BATCH=${BATCH}, GPU=${GPU}"
 echo "Will sweep: window_strides × ${#WINDOW_STRIDES[@]}"
 echo "-----------------------------------------------"
@@ -87,11 +82,12 @@ for WINDOW_STRIDE in "${WINDOW_STRIDES[@]}"; do
     "optimizer.configs.lr=${LR}"
     "loss.configs.soft_alpha=${SOFT_ALPHA}"
     "loss.configs.lambda_aux=${LAMBDA_AUX}"
-    "loss.configs.use_token_loss=True"
+    "loss.configs.use_token_loss=False"
     "loss.configs.evidence_selection_strategy=reference_model"
     "loss.configs.reference_model_path=${REF}"
     "loss.configs.fallback_to_full_attention_if_empty=False"
     "loss.configs.explanation_method=${METHOD}"
+    "loss.configs.mask_pooling=False"
     "loss.configs.window_stride=${WINDOW_STRIDE}"
   )
 

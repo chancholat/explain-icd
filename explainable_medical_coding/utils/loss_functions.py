@@ -730,7 +730,7 @@ def masked_pooling_aux_loss(
         mask_pooling=mask_pooling,
         soft_alpha=soft_alpha,
         fallback_to_full_attention_if_empty=fallback_to_full_attention_if_empty,
-        effective_attention_mask=masks_to_use,
+        effective_attention_masks=masks_to_use,
     )
 
     # Primary document-level loss
