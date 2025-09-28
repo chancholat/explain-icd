@@ -155,7 +155,6 @@ def main(cfg: OmegaConf) -> None:
         desc="Filtering all notes that are not discharge summaries",
     )
 
-
     lookups = factories.get_lookups(
         dataset=dataset,
         text_tokenizer=text_tokenizer,
@@ -227,7 +226,7 @@ def main(cfg: OmegaConf) -> None:
             ),
             desc="Adding reference model masking",
             batched=True,
-            batch_size=64,
+            batch_size=256,
         )
 
     loss_function = factories.get_loss_function(config=cfg.loss)
