@@ -211,6 +211,9 @@ def main(cfg: OmegaConf) -> None:
             device
         )
         print(f"Explanation decision boundary: {explanation_decision_boundary}")
+        explanation_threshold_scale = cfg.loss.configs.get('explanation_threshold_scale', 0.01)
+        explanation_decision_boundary *= explanation_threshold_scale
+        print(f"Scaled explanation decision boundary (x{explanation_threshold_scale}): {explanation_decision_boundary:.4f}")
         print(f"Reference decision boundary: {reference_decision_boundary}")
         from explainable_medical_coding.utils.analysis import calculate_selected_mask_ids
         LOGGER.info("Adding selected_mask_ids to dataset using reference model")
@@ -222,7 +225,7 @@ def main(cfg: OmegaConf) -> None:
                 explanation_decision_boundary=explanation_decision_boundary,
                 device=device,
                 decision_boundary=reference_decision_boundary,
-                stride=cfg.loss.configs.get('stride', 0)
+                stride=cfg.loss.configs.get('window_stride', 0)
             ),
             desc="Adding reference model masking",
             batched=True,

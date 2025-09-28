@@ -221,6 +221,9 @@ def visualize_masks(cfg: OmegaConf) -> None:
 
     console.print(f"[bold magenta]Reference decision boundary: {reference_decision_boundary:.4f}[/bold magenta]")
     console.print(f"[bold magenta]Explanation decision boundary: {explanation_decision_boundary:.4f}[/bold magenta]")
+    explanation_threshold_scale = cfg.loss.configs.get('explanation_threshold_scale', 0.01)
+    explanation_decision_boundary *= explanation_threshold_scale
+    console.print(f"[bold magenta]Scaled explanation decision boundary (x{explanation_threshold_scale}): {explanation_decision_boundary:.4f}[/bold magenta]")
 
     # Take a small sample for visualization
     sample_size = 6  # Increased to test batching
@@ -241,7 +244,8 @@ def visualize_masks(cfg: OmegaConf) -> None:
             explanation_decision_boundary=explanation_decision_boundary,
             device=device,
             decision_boundary=reference_decision_boundary,
-            stride=3
+            stride=cfg.loss.configs.get('window_stride', 0)
+
         ),
         desc="Testing batched mask calculation",
         batched=True,
@@ -305,7 +309,7 @@ def visualize_masks(cfg: OmegaConf) -> None:
             explanation_decision_boundary=explanation_decision_boundary,
             device=device,
             decision_boundary=reference_decision_boundary,
-            stride=3
+            stride=cfg.loss.configs.get('window_stride', 0)
         )
         
         single_selected_mask_ids = single_result["selected_mask_ids"]
