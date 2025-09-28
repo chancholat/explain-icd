@@ -48,6 +48,7 @@ def main(cfg: OmegaConf) -> None:
     dataset = load_and_prepare_dataset(
         dataset_path, text_tokenizer, target_tokenizer, max_input_length, target_columns
     )
+
     dataset = dataset.filter(
         lambda x: x["note_type"] == "Discharge summary",
         desc="Filtering all notes that are not discharge summaries",

@@ -17,8 +17,8 @@ export WANDB_API_KEY=c76d20783a5b6c0eb844caaf78d65aef0e27d699  # consider a secr
 
 # ---------------- Fixed base config ----------------
 EXPERIMENT="mdace_icd9_code/plm_efa"
-MAX_BATCH=16
-BATCH=16
+MAX_BATCH=8
+BATCH=8
 GPU=0
 
 # ---------------- Grids ----------------

@@ -149,6 +149,13 @@ def main(cfg: OmegaConf) -> None:
         type="torch", columns=["input_ids", "length", "attention_mask", "target_ids"]
     )
 
+    # This is for train with attention based input selection
+    dataset = dataset.filter(
+        lambda x: x["note_type"] == "Discharge summary",
+        desc="Filtering all notes that are not discharge summaries",
+    )
+
+
     lookups = factories.get_lookups(
         dataset=dataset,
         text_tokenizer=text_tokenizer,
