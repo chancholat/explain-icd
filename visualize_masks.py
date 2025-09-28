@@ -51,7 +51,7 @@ def load_and_prepare_reference_model(cfg, reference_model_path, text_tokenizer, 
     reference_model.eval()
     LOGGER.info("Loading Reference Target Tokenizer from reference_model_path")
     reference_target_tokenizer = TargetTokenizer(autoregressive=autoregressive)
-    # reference_target_tokenizer.load(reference_model_path / "target_tokenizer.json")
+    reference_target_tokenizer.load(reference_model_path / "target_tokenizer.json")
     
     explainability_method = cfg.loss.configs.get('explanation_method', None)
     if explainability_method is None:
