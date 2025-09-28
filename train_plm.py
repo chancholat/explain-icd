@@ -150,10 +150,10 @@ def main(cfg: OmegaConf) -> None:
     )
 
     # This is for train with attention based input selection
-    dataset = dataset.filter(
-        lambda x: x["note_type"] == "Discharge summary",
-        desc="Filtering all notes that are not discharge summaries",
-    )
+    # dataset = dataset.filter(
+    #     lambda x: x["note_type"] == "Discharge summary",
+    #     desc="Filtering all notes that are not discharge summaries",
+    # )
 
     lookups = factories.get_lookups(
         dataset=dataset,
