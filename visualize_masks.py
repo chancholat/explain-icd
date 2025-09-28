@@ -58,55 +58,53 @@ def load_and_prepare_reference_model(cfg, reference_model_path, text_tokenizer, 
         raise ValueError("Explainability method must be specified for reference model")
 
     mdace_path = 'explainable_medical_coding/datasets/mdace_inpatient_icd9.py'
-    # mdace_dataset = load_and_prepare_dataset(
-    #     mdace_path, 
-    #     text_tokenizer, 
-    #     reference_target_tokenizer, 
-    #     max_input_length, 
-    #     target_columns
+    mdace_dataset = load_and_prepare_dataset(
+        mdace_path, 
+        text_tokenizer, 
+        reference_target_tokenizer, 
+        max_input_length, 
+        target_columns
+    )
+
+    # mdace_dataset = load_dataset(str(mdace_path), trust_remote_code=True)
+    # max_input_length = int(cfg.data.max_length)
+    # # tokenize text
+    # mdace_dataset = mdace_dataset.map(
+    #     lambda x: text_tokenizer(
+    #         x[TEXT_COLUMN],
+    #         return_length=True,
+    #         truncation=True,
+    #         max_length=max_input_length,
+    #     ),
+    #     batched=True,
+    #     num_proc=8,
+    #     batch_size=1_000,
+    #     desc="Tokenizing text",
     # )
 
+    # mdace_dataset = mdace_dataset.map(
+    #     lambda x: create_targets_column(x, target_columns),
+    #     desc="Creating targets column",
+    # )
+    # known_targets = set(get_unique_targets(mdace_dataset))
+    # mdace_dataset = mdace_dataset.map(
+    #     lambda x: filter_unknown_targets(x, known_targets=known_targets),
+    #     desc="Filter unknown targets",
+    # )
+    # mdace_dataset = mdace_dataset.filter(
+    #     lambda x: len(x[TARGET_COLUMN]) > 0, desc="Filtering empty targets"
+    # )
+    # mdace_dataset = mdace_dataset.map(lambda x: format_evidence_spans(x, text_tokenizer))
+    # unique_targets = get_unique_targets(mdace_dataset)
+    # reference_target_tokenizer.fit(unique_targets)
 
-
-    mdace_dataset = load_dataset(str(mdace_path), trust_remote_code=True)
-    max_input_length = int(cfg.data.max_length)
-    # tokenize text
-    mdace_dataset = mdace_dataset.map(
-        lambda x: text_tokenizer(
-            x[TEXT_COLUMN],
-            return_length=True,
-            truncation=True,
-            max_length=max_input_length,
-        ),
-        batched=True,
-        num_proc=8,
-        batch_size=1_000,
-        desc="Tokenizing text",
-    )
-
-    mdace_dataset = mdace_dataset.map(
-        lambda x: create_targets_column(x, target_columns),
-        desc="Creating targets column",
-    )
-    known_targets = set(get_unique_targets(mdace_dataset))
-    mdace_dataset = mdace_dataset.map(
-        lambda x: filter_unknown_targets(x, known_targets=known_targets),
-        desc="Filter unknown targets",
-    )
-    mdace_dataset = mdace_dataset.filter(
-        lambda x: len(x[TARGET_COLUMN]) > 0, desc="Filtering empty targets"
-    )
-    mdace_dataset = mdace_dataset.map(lambda x: format_evidence_spans(x, text_tokenizer))
-    unique_targets = get_unique_targets(mdace_dataset)
-    reference_target_tokenizer.fit(unique_targets)
-
-    mdace_dataset = mdace_dataset.map(
-        lambda x: {"target_ids": reference_target_tokenizer(x[TARGET_COLUMN])},
-        desc="Converting targets to target ids",
-    )
-    mdace_dataset.set_format(
-        type="torch", columns=["input_ids", "length", "attention_mask", "target_ids"]
-    )
+    # mdace_dataset = mdace_dataset.map(
+    #     lambda x: {"target_ids": reference_target_tokenizer(x[TARGET_COLUMN])},
+    #     desc="Converting targets to target ids",
+    # )
+    # mdace_dataset.set_format(
+    #     type="torch", columns=["input_ids", "length", "attention_mask", "target_ids"]
+    # )
 
 
     explanation_decision_boundary, explainer_callable = compute_explanation_decision_boundary_from_reference(
