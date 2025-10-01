@@ -17,37 +17,39 @@ export WANDB_API_KEY=c76d20783a5b6c0eb844caaf78d65aef0e27d699  # consider a secr
 
 # ---------------- Fixed base config ----------------
 EXPERIMENT="mdace_icd9_code/plm_efa"
-MAX_BATCH=8
-BATCH=8
+MAX_BATCH=16
+BATCH=16
 GPU=0
 
 # ---------------- Grids ----------------
 LRS=(5e-5 1e-5)          # $1 -> 0..1
-METHODS=(laat grad_attention)  # $2 -> 0..1
-WINDOW_STRIDES=(3 6 10 15 20)
+SCALE_FACTORS=(0.1 0.3 1.0) # $2 -> 0..2 
+
+# sweep over window_stride
+WINDOW_STRIDES=(0 3 10 30)
 
 # Fixed singletons
 REF="models/supervised/ym0o7co8"
 SOFT_ALPHA=0
 LAMBDA_AUX=0
+METHOD=(laat)
 
 lr_idx=$1
-method_idx=$2
+sc_factor=$2
 
 if (( lr_idx < 0 || lr_idx >= ${#LRS[@]} )); then
   echo "ERROR: lr_idx out of range (0..$(( ${#LRS[@]}-1 )))"; exit 2
 fi
-if (( method_idx < 0 || method_idx >= ${#METHODS[@]} )); then
-  echo "ERROR: method_idx out of range (0..$(( ${#METHODS[@]}-1 )))"; exit 3
+if (( sc_factor < 0 || sc_factor >= ${#SCALE_FACTORS[@]} )); then
+  echo "ERROR: sc_factor out of range (0..$(( ${#SCALE_FACTORS[@]}-1 )))"; exit 2
 fi
 
 LR="${LRS[$lr_idx]}"
-METHOD="${METHODS[$method_idx]}"
-
+SCALE_FACTOR="${SCALE_FACTORS[$sc_factor]}"
 
 echo "=== JOB ${SLURM_JOB_ID:-N/A} on $(hostname) ==="
-echo "Injected: LR=${LR}, METHOD=${METHOD}"
-echo "Fixed: EXPERIMENT=${EXPERIMENT}, BATCH=${BATCH}, GPU=${GPU}"
+echo "Injected: LR=${LR}, SCALE_FACTOR=${SCALE_FACTOR}"
+echo "Fixed: EXPERIMENT=${EXPERIMENT}, BATCH=${BATCH}, GPU=${GPU}, REF=${REF}, METHOD=${METHOD}"
 echo "Will sweep: window_strides × ${#WINDOW_STRIDES[@]}"
 echo "-----------------------------------------------"
 
@@ -59,7 +61,7 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 # ---------------- One loop over window_stride ----------------
 for WINDOW_STRIDE in "${WINDOW_STRIDES[@]}"; do
   REF_BASENAME="$(basename "$REF")"
-  TAG="lr${LR}_sa${SOFT_ALPHA}_${METHOD}_${REF_BASENAME}_ws${WINDOW_STRIDE}"
+  TAG="lr${LR}_${METHOD}_${REF_BASENAME}_ws${WINDOW_STRIDE}_sf${SCALE_FACTOR}"
   LOG="logs/plm_${TAG}_job${JID}_${STAMP}.out"
   ERR="logs/plm_${TAG}_job${JID}_${STAMP}.err"
 
@@ -83,6 +85,7 @@ for WINDOW_STRIDE in "${WINDOW_STRIDES[@]}"; do
     "loss.configs.explanation_method=${METHOD}"
     "loss.configs.mask_pooling=False"
     "loss.configs.window_stride=${WINDOW_STRIDE}"
+    "loss.configs.explanation_threshold_scale=${SCALE_FACTOR}"
   )
 
   {

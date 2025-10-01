@@ -8,70 +8,76 @@
 #SBATCH --mail-type=END,TIME_LIMIT
 #SBATCH --mail-user=thin.nguyen@deakin.edu.au
 
-# ---------------- Env ----------------
+# --- Environment setup ---
 module load Anaconda3
 source activate
 conda activate haichan
 export PYTHONNOUSERSITE=1
-export WANDB_API_KEY=c76d20783a5b6c0eb844caaf78d65aef0e27d699  # consider a secret manager
+export WANDB_API_KEY=c76d20783a5b6c0eb844caaf78d65aef0e27d699
 
-# ---------------- Fixed base config ----------------
+# --- Fixed base config ---
 MAX_BATCH=16
 BATCH=16
 GPU=0
 
-# ---------------- Grids ----------------
-EXPERIMENTS=(mdace_icd9_code/plm_icd mdace_icd9_code/plm_icd_supervised mdace_icd9_code/plm_icd_pgd mdace_icd9_code/plm_icd_igr) # $1 -> 0..3
+# --- Experiment grid ---
+EXPERIMENTS=(mdace_icd9_code/plm_icd mdace_icd9_code/plm_icd_supervised mdace_icd9_code/plm_icd_pgd mdace_icd9_code/plm_icd_igr)
 
-# ---------------- Parse CLI args ----------------
+# --- Input arguments ---
+exp_idx=$1   # 0..3
 
-exp_idx=$1
+if [ -z "$exp_idx" ]; then
+    echo "❌ Usage: sbatch run_plm.sh <exp_idx: 0..3>"
+    exit 1
+fi
 
-# Basic bounds checks
 if (( exp_idx < 0 || exp_idx >= ${#EXPERIMENTS[@]} )); then
-  echo "ERROR: exp_idx out of range (0..$(( ${#EXPERIMENTS[@]}-1 )))"; exit 3
+    echo "❌ Invalid exp_idx: $exp_idx (must be 0..$(( ${#EXPERIMENTS[@]}-1 )))"
+    exit 1
 fi
 
 EXPERIMENT="${EXPERIMENTS[$exp_idx]}"
 
-echo "=== JOB ${SLURM_JOB_ID:-N/A} on $(hostname) ==="
-echo "Fixed: EXPERIMENT=${EXPERIMENT}, BATCH=${BATCH}, GPU=${GPU}"
-echo "-----------------------------------------------"
-
-mkdir -p logs
-
-JID="${SLURM_JOB_ID:-local$$}"
+# --- Logging ---
+log_dir="logs"
+mkdir -p "$log_dir"
 STAMP="$(date +%Y%m%d-%H%M%S)"
-# ---------------- One run ----------------
+JID="${SLURM_JOB_ID:-local$$}"
 TAG="${EXPERIMENT}_baseline"
-LOG="logs/plm_${TAG}_job${JID}_${STAMP}.out"
-ERR="logs/plm_${TAG}_job${JID}_${STAMP}.err"
 
-echo ""
-echo ">> RUN ${TAG}"
-echo "   -> log: ${LOG}"
-echo "   -> err: ${ERR}"
+# sanitize experiment for filenames (replace / with _)
+safe_exp="${EXPERIMENT//\//_}"
 
-CMD=( python train_plm.py
+log_file="${log_dir}/plm_${safe_exp}_job${JID}_${STAMP}.out"
+err_file="${log_dir}/plm_${safe_exp}_job${JID}_${STAMP}.err"
+exec > "$log_file" 2> "$err_file"
+
+echo "🚀 Starting ${TAG}"
+echo "HOST: $(hostname)"
+echo "JOB : ${JID}"
+echo "---------------------------------------------"
+echo "Fixed: MAX_BATCH=${MAX_BATCH}, BATCH=${BATCH}, GPU=${GPU}"
+echo "Experiment: ${EXPERIMENT}"
+echo "Logs: out=$log_file, err=$err_file"
+echo "---------------------------------------------"
+
+# --- Command ---
+CMD=( python -u train_plm.py
   "experiment=${EXPERIMENT}"
   "dataloader.max_batch_size=${MAX_BATCH}"
   "dataloader.batch_size=${BATCH}"
   "gpu=${GPU}"
 )
 
-{
-  echo "JOB=${JID}"
-  echo "HOST=$(hostname)"
-  echo "[CMD] ${CMD[*]}"
-  echo "-------------------------------------------"
-} >"$LOG"
+echo "[CMD] ${CMD[*]}"
+echo "---------------------------------------------"
 
-"${CMD[@]}" >>"$LOG" 2>"$ERR"
+# --- Run ---
+"${CMD[@]}"
+status=$?
 
-if [[ $? -eq 0 ]]; then
-  echo "✅ Done: ${TAG}" | tee -a "$LOG"
+if [[ $status -eq 0 ]]; then
+  echo "✅ Done: ${TAG}"
 else
-  echo "❌ Failed: ${TAG} (see $ERR)" | tee -a "$LOG"
+  echo "❌ Failed: ${TAG} (exit code $status)"
 fi
-
-echo "=== Completed for EXPERIMENT=${EXPERIMENT} ==="
