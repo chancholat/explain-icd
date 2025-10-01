@@ -20,64 +20,56 @@ MAX_BATCH=16
 BATCH=16
 GPU=0
 
-# --- Experiment grid ---
-EXPERIMENTS=(mdace_icd9_code/plm_icd mdace_icd9_code/plm_icd_supervised mdace_icd9_code/plm_icd_pgd mdace_icd9_code/plm_icd_igr)
-
-# --- Input arguments ---
-exp_idx=$1   # 0..3
-
-if [ -z "$exp_idx" ]; then
-    echo "❌ Usage: sbatch run_plm.sh <exp_idx: 0..3>"
-    exit 1
-fi
-
-if (( exp_idx < 0 || exp_idx >= ${#EXPERIMENTS[@]} )); then
-    echo "❌ Invalid exp_idx: $exp_idx (must be 0..$(( ${#EXPERIMENTS[@]}-1 )))"
-    exit 1
-fi
-
-EXPERIMENT="${EXPERIMENTS[$exp_idx]}"
+# --- Experiment list ---
+EXPERIMENTS=(
+  "mdace_icd9_code/plm_icd"
+  "mdace_icd9_code/plm_icd_supervised"
+  "mdace_icd9_code/plm_icd_pgd"
+  "mdace_icd9_code/plm_icd_igr"
+)
 
 # --- Logging ---
 log_dir="logs"
 mkdir -p "$log_dir"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 JID="${SLURM_JOB_ID:-local$$}"
-TAG="${EXPERIMENT}_baseline"
 
-# sanitize experiment for filenames (replace / with _)
-safe_exp="${EXPERIMENT//\//_}"
+# --- Loop through experiments ---
+for EXPERIMENT in "${EXPERIMENTS[@]}"; do
+    TAG="${EXPERIMENT}_baseline"
+    safe_exp="${EXPERIMENT//\//_}"   # replace / with _ for safe filenames
 
-log_file="${log_dir}/plm_${safe_exp}_job${JID}_${STAMP}.out"
-err_file="${log_dir}/plm_${safe_exp}_job${JID}_${STAMP}.err"
-exec > "$log_file" 2> "$err_file"
+    log_file="${log_dir}/plm_${safe_exp}_job${JID}_${STAMP}.out"
+    err_file="${log_dir}/plm_${safe_exp}_job${JID}_${STAMP}.err"
+    exec > >(tee -a "$log_file") 2> >(tee -a "$err_file" >&2)
 
-echo "🚀 Starting ${TAG}"
-echo "HOST: $(hostname)"
-echo "JOB : ${JID}"
-echo "---------------------------------------------"
-echo "Fixed: MAX_BATCH=${MAX_BATCH}, BATCH=${BATCH}, GPU=${GPU}"
-echo "Experiment: ${EXPERIMENT}"
-echo "Logs: out=$log_file, err=$err_file"
-echo "---------------------------------------------"
+    echo "🚀 Starting experiment: ${EXPERIMENT}"
+    echo "JOB: $JID on host $(hostname)"
+    echo "MAX_BATCH=${MAX_BATCH}, BATCH=${BATCH}, GPU=${GPU}"
+    echo "Logs: out=$log_file, err=$err_file"
+    echo "---------------------------------------------"
 
-# --- Command ---
-CMD=( python -u train_plm.py
-  "experiment=${EXPERIMENT}"
-  "dataloader.max_batch_size=${MAX_BATCH}"
-  "dataloader.batch_size=${BATCH}"
-  "gpu=${GPU}"
-)
+    # --- Command ---
+    CMD=( python -u train_plm.py
+      "experiment=${EXPERIMENT}"
+      "dataloader.max_batch_size=${MAX_BATCH}"
+      "dataloader.batch_size=${BATCH}"
+      "gpu=${GPU}"
+    )
 
-echo "[CMD] ${CMD[*]}"
-echo "---------------------------------------------"
+    echo "[CMD] ${CMD[*]}"
+    echo "---------------------------------------------"
 
-# --- Run ---
-"${CMD[@]}"
-status=$?
+    # --- Run ---
+    "${CMD[@]}"
+    status=$?
 
-if [[ $status -eq 0 ]]; then
-  echo "✅ Done: ${TAG}"
-else
-  echo "❌ Failed: ${TAG} (exit code $status)"
-fi
+    if [[ $status -eq 0 ]]; then
+      echo "✅ Done: ${TAG}"
+    else
+      echo "❌ Failed: ${TAG} (exit code $status)"
+    fi
+    echo "============================================="
+done
+
+echo "🎉 All experiments completed."
