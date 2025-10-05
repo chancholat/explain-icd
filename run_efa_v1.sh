@@ -22,29 +22,34 @@ BATCH=16
 GPU=0
 
 # ---------------- Grids ----------------
-SCALE_FACTORS=(0.03 0.07 0.02 0.01) # $1 -> 0..1
+LRS=(5e-5 1e-5)          # $1 -> 0..1
+SCALE_FACTORS=(0.1 0.3 1.0) # $2 -> 0..2 
 
 # sweep over window_stride
-WINDOW_STRIDES=(10 3 20)
-  
+WINDOW_STRIDES=(0 3 10 30)
+
 # Fixed singletons
 REF="models/supervised/ym0o7co8"
 SOFT_ALPHA=0
 LAMBDA_AUX=0
-LR=(5e-5)          
-METHOD=(laat) 
+METHOD=(laat)
 
-sc_factor=$1
+lr_idx=$1
+sc_factor=$2
 
+if (( lr_idx < 0 || lr_idx >= ${#LRS[@]} )); then
+  echo "ERROR: lr_idx out of range (0..$(( ${#LRS[@]}-1 )))"; exit 2
+fi
 if (( sc_factor < 0 || sc_factor >= ${#SCALE_FACTORS[@]} )); then
   echo "ERROR: sc_factor out of range (0..$(( ${#SCALE_FACTORS[@]}-1 )))"; exit 2
 fi
 
+LR="${LRS[$lr_idx]}"
 SCALE_FACTOR="${SCALE_FACTORS[$sc_factor]}"
 
 echo "=== JOB ${SLURM_JOB_ID:-N/A} on $(hostname) ==="
-echo "Injected: SCALE_FACTOR=${SCALE_FACTOR}"
-echo "Fixed: EXPERIMENT=${EXPERIMENT}, BATCH=${BATCH}, GPU=${GPU}, REF=${REF}, METHOD=${METHOD}, LR=${LR}"
+echo "Injected: LR=${LR}, SCALE_FACTOR=${SCALE_FACTOR}"
+echo "Fixed: EXPERIMENT=${EXPERIMENT}, BATCH=${BATCH}, GPU=${GPU}, REF=${REF}, METHOD=${METHOD}"
 echo "Will sweep: window_strides × ${#WINDOW_STRIDES[@]}"
 echo "-----------------------------------------------"
 

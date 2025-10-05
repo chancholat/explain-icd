@@ -134,6 +134,56 @@ def highlight_tokens_in_text(text: str, input_ids: list, tokenizer: AutoTokenize
     
     return rich_text
 
+def display_batch_selected_tokens(batched_results, text_tokenizer):
+    # Visualize the results
+    for i, sample in enumerate(batched_results):
+        console.print(f"\n[bold yellow]Sample {i+1}:[/bold yellow]")
+        
+        # Get original text and target codes
+        original_text = sample[TEXT_COLUMN]
+        target_codes = sample[TARGET_COLUMN]
+        input_ids = sample["input_ids"].tolist()
+        selected_mask_ids = sample["selected_mask_ids"]
+        
+        console.print(f"Target codes: {target_codes}")
+        console.print(f"Text length: {len(original_text)} chars, Token length: {len(input_ids)} tokens")
+        console.print(f"Selected mask positions: {selected_mask_ids}")
+        console.print(f"Number of highlighted tokens: {len(selected_mask_ids)}/{len(input_ids)} ({len(selected_mask_ids)/len(input_ids)*100:.1f}%)")
+        
+        try:
+
+            print("Creating visualization with scale factor: ", explanation_threshold_scale)
+            # Create highlighted visualization
+            highlighted_text = highlight_tokens_in_text(
+                original_text, input_ids, text_tokenizer, selected_mask_ids
+            )
+            
+            # Display results
+            console.print(Panel(highlighted_text, title=f"Sample {i+1} - Highlighted Important Tokens (Batched)"))
+            
+            # Show some highlighted tokens
+            highlighted_tokens = []
+            for pos in selected_mask_ids[:10]:  # Show first 10 highlighted tokens
+                if pos < len(input_ids):
+                    token = text_tokenizer.decode([input_ids[pos]], skip_special_tokens=False)
+                    highlighted_tokens.append(f"'{token.strip()}'")
+
+            explanation_threshold_scale = explanation_threshold_scale * 0.1
+            print("Creating visualization with scale factor: ", explanation_threshold_scale)
+
+            # Create highlighted visualization
+            highlighted_text = highlight_tokens_in_text(
+                original_text, input_ids, text_tokenizer, selected_mask_ids
+            )
+
+            if highlighted_tokens:
+                console.print(f"Sample highlighted tokens: {', '.join(highlighted_tokens)}")
+            
+        except Exception as e:
+            console.print(f"[bold red]Error visualizing sample {i+1}: {e}[/bold red]")
+            import traceback
+            traceback.print_exc()
+
 @hydra.main(
     version_base=None,
     config_path="explainable_medical_coding/config",
@@ -250,47 +300,31 @@ def visualize_masks(cfg: OmegaConf) -> None:
         batch_size=batch_size,
     )
 
-    console.print(f"[bold green]Batched processing completed successfully![/bold green]")
+    console.print(f"[bold green]Batched processing completed successfully with scaling {explanation_threshold_scale}![/bold green]")
     console.print(f"Processed {len(batched_results)} samples")
 
-    # Visualize the results
-    for i, sample in enumerate(batched_results):
-        console.print(f"\n[bold yellow]Sample {i+1}:[/bold yellow]")
-        
-        # Get original text and target codes
-        original_text = sample[TEXT_COLUMN]
-        target_codes = sample[TARGET_COLUMN]
-        input_ids = sample["input_ids"].tolist()
-        selected_mask_ids = sample["selected_mask_ids"]
-        
-        console.print(f"Target codes: {target_codes}")
-        console.print(f"Text length: {len(original_text)} chars, Token length: {len(input_ids)} tokens")
-        console.print(f"Selected mask positions: {selected_mask_ids}")
-        console.print(f"Number of highlighted tokens: {len(selected_mask_ids)}/{len(input_ids)} ({len(selected_mask_ids)/len(input_ids)*100:.1f}%)")
-        
-        try:
-            # Create highlighted visualization
-            highlighted_text = highlight_tokens_in_text(
-                original_text, input_ids, text_tokenizer, selected_mask_ids
-            )
-            
-            # Display results
-            console.print(Panel(highlighted_text, title=f"Sample {i+1} - Highlighted Important Tokens (Batched)"))
-            
-            # Show some highlighted tokens
-            highlighted_tokens = []
-            for pos in selected_mask_ids[:10]:  # Show first 10 highlighted tokens
-                if pos < len(input_ids):
-                    token = text_tokenizer.decode([input_ids[pos]], skip_special_tokens=False)
-                    highlighted_tokens.append(f"'{token.strip()}'")
-            
-            if highlighted_tokens:
-                console.print(f"Sample highlighted tokens: {', '.join(highlighted_tokens)}")
-            
-        except Exception as e:
-            console.print(f"[bold red]Error visualizing sample {i+1}: {e}[/bold red]")
-            import traceback
-            traceback.print_exc()
+    display_batch_selected_tokens(batched_results, text_tokenizer)
+
+    # Second batch result that scaling down the threshold
+    explanation_decision_boundary *= 0.1
+    batched_results = sample_dataset.map(
+        lambda x: calculate_selected_mask_ids(
+            explainer_callable=explainer_callable,
+            reference_model=reference_model,
+            x=x,
+            explanation_decision_boundary=explanation_decision_boundary,
+            device=device,
+            decision_boundary=reference_decision_boundary,
+            stride=cfg.loss.configs.get('window_stride', 0)
+
+        ),
+        desc="Testing batched mask calculation",
+        batched=True,
+        batch_size=batch_size,
+    )
+    console.print(f"[bold green]Batched processing completed successfully with scaling {explanation_threshold_scale}![/bold green]")
+    display_batch_selected_tokens(batched_results, text_tokenizer)
+
 
     # Test single example processing for comparison
     console.print(f"\n[bold blue]Testing single example processing for comparison...[/bold blue]")
