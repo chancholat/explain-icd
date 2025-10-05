@@ -134,7 +134,7 @@ def highlight_tokens_in_text(text: str, input_ids: list, tokenizer: AutoTokenize
     
     return rich_text
 
-def display_batch_selected_tokens(batched_results, text_tokenizer):
+def display_batch_selected_tokens(batched_results, text_tokenizer, explanation_threshold_scale):
     # Visualize the results
     for i, sample in enumerate(batched_results):
         console.print(f"\n[bold yellow]Sample {i+1}:[/bold yellow]")
@@ -167,14 +167,6 @@ def display_batch_selected_tokens(batched_results, text_tokenizer):
                 if pos < len(input_ids):
                     token = text_tokenizer.decode([input_ids[pos]], skip_special_tokens=False)
                     highlighted_tokens.append(f"'{token.strip()}'")
-
-            explanation_threshold_scale = explanation_threshold_scale * 0.1
-            print("Creating visualization with scale factor: ", explanation_threshold_scale)
-
-            # Create highlighted visualization
-            highlighted_text = highlight_tokens_in_text(
-                original_text, input_ids, text_tokenizer, selected_mask_ids
-            )
 
             if highlighted_tokens:
                 console.print(f"Sample highlighted tokens: {', '.join(highlighted_tokens)}")
@@ -303,7 +295,7 @@ def visualize_masks(cfg: OmegaConf) -> None:
     console.print(f"[bold green]Batched processing completed successfully with scaling {explanation_threshold_scale}![/bold green]")
     console.print(f"Processed {len(batched_results)} samples")
 
-    display_batch_selected_tokens(batched_results, text_tokenizer)
+    display_batch_selected_tokens(batched_results, text_tokenizer, explanation_threshold_scale)
 
     # Second batch result that scaling down the threshold
     explanation_decision_boundary *= 0.1
@@ -323,7 +315,7 @@ def visualize_masks(cfg: OmegaConf) -> None:
         batch_size=batch_size,
     )
     console.print(f"[bold green]Batched processing completed successfully with scaling {explanation_threshold_scale}![/bold green]")
-    display_batch_selected_tokens(batched_results, text_tokenizer)
+    display_batch_selected_tokens(batched_results, text_tokenizer, explanation_threshold_scale)
 
 
     # Test single example processing for comparison
