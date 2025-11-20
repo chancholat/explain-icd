@@ -653,21 +653,6 @@ def _build_selected_mask_from_batch(batch, seq_len: int, device: torch.device):
         return mask
     return None
 
-def _attention_mask_from_selected_mask(selected_mask: torch.Tensor, attention_masks: torch.Tensor):
-    """Create an attention mask that only attends to selected tokens.
-    Args:
-        selected_mask (torch.Tensor): (B, L) binary mask of selected tokens
-        attention_masks (torch.Tensor): (B, L) original attention masks
-
-    Returns:
-        torch.Tensor: (B, L) modified attention masks
-    """
-    # Ensure selected_mask is float
-    selected_mask = selected_mask.to(dtype=attention_masks.dtype)
-    # Combine with original attention masks
-    modified_attention_masks = attention_masks * selected_mask
-    return modified_attention_masks
-
 def masked_pooling_aux_loss(
     batch,
     model,
